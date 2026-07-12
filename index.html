@@ -536,6 +536,274 @@
         };
 
         /**
+         * InvitesView Component
+         * Lets the host create events, add invitees (by phone or email), send them
+         * an invite (via the phone's own Messages/Mail app -- there's no way for a
+         * webpage to send SMS/email on its own, this just hands off to the device),
+         * and manually track RSVP status plus who actually showed up afterward.
+         * Data is stored the same way as the rest of the app (localStorage, which
+         * the existing cloud sync already picks up automatically for logged-in users).
+         */
+        const InvitesView = ({ theme, appBgClass, mainCardBgClass, sectionBgClass, inputBgClass, inputBorderClass, subtextColorClass, placeholderColorClass, headingTextColorClass, onBackToHome }) => {
+            const [events, setEvents] = useState(() => {
+                try { return JSON.parse(localStorage.getItem('pokerAppInvites') || '[]'); } catch (e) { return []; }
+            });
+            const [currentEventId, setCurrentEventId] = useState(() => localStorage.getItem('pokerAppInvitesCurrentEvent') || null);
+            const [newEventTitle, setNewEventTitle] = useState('');
+            const [newEventDate, setNewEventDate] = useState('');
+            const [newName, setNewName] = useState('');
+            const [newContact, setNewContact] = useState('');
+            const [newContactType, setNewContactType] = useState('phone');
+
+            useEffect(() => {
+                localStorage.setItem('pokerAppInvites', JSON.stringify(events));
+            }, [events]);
+
+            useEffect(() => {
+                if (currentEventId) localStorage.setItem('pokerAppInvitesCurrentEvent', currentEventId);
+                else localStorage.removeItem('pokerAppInvitesCurrentEvent');
+            }, [currentEventId]);
+
+            const currentEvent = events.find(e => e.id === currentEventId);
+
+            const createEvent = () => {
+                if (!newEventTitle.trim()) return;
+                const id = Date.now().toString();
+                const event = { id, title: newEventTitle.trim(), date: newEventDate || '', invitees: [] };
+                setEvents(prev => [event, ...prev]);
+                setCurrentEventId(id);
+                setNewEventTitle('');
+                setNewEventDate('');
+            };
+
+            const deleteEvent = (id) => {
+                setEvents(prev => prev.filter(e => e.id !== id));
+                if (currentEventId === id) setCurrentEventId(null);
+            };
+
+            const updateCurrentEvent = (updater) => {
+                setEvents(prev => prev.map(e => e.id === currentEventId ? updater(e) : e));
+            };
+
+            const addInvitee = () => {
+                if (!newName.trim() || !newContact.trim()) return;
+                const invitee = { id: Date.now().toString(), name: newName.trim(), contact: newContact.trim(), contactType: newContactType, status: 'pending', attended: null };
+                updateCurrentEvent(e => ({ ...e, invitees: [...e.invitees, invitee] }));
+                setNewName('');
+                setNewContact('');
+            };
+
+            const removeInvitee = (inviteeId) => {
+                updateCurrentEvent(e => ({ ...e, invitees: e.invitees.filter(i => i.id !== inviteeId) }));
+            };
+
+            const setStatus = (inviteeId, status) => {
+                updateCurrentEvent(e => ({
+                    ...e,
+                    invitees: e.invitees.map(i => i.id === inviteeId ? { ...i, status, attended: status === 'yes' ? i.attended : null } : i)
+                }));
+            };
+
+            const setAttended = (inviteeId, attended) => {
+                updateCurrentEvent(e => ({ ...e, invitees: e.invitees.map(i => i.id === inviteeId ? { ...i, attended } : i) }));
+            };
+
+            const buildMessage = (event) => `Hey! You're invited to ${event.title}${event.date ? ' on ' + event.date : ''}. Let me know if you can make it!`;
+
+            const sendInviteLink = (invitee, event) => {
+                const message = buildMessage(event);
+                if (invitee.contactType === 'phone') {
+                    return `sms:${invitee.contact}?body=${encodeURIComponent(message)}`;
+                }
+                return `mailto:${invitee.contact}?subject=${encodeURIComponent(event.title + ' - Invite')}&body=${encodeURIComponent(message)}`;
+            };
+
+            const textAllPending = () => {
+                if (!currentEvent) return;
+                const numbers = currentEvent.invitees.filter(i => i.status === 'pending' && i.contactType === 'phone').map(i => i.contact);
+                if (!numbers.length) return;
+                window.location.href = `sms:${numbers.join(',')}?body=${encodeURIComponent(buildMessage(currentEvent))}`;
+            };
+
+            const emailAllPending = () => {
+                if (!currentEvent) return;
+                const emails = currentEvent.invitees.filter(i => i.status === 'pending' && i.contactType === 'email').map(i => i.contact);
+                if (!emails.length) return;
+                window.location.href = `mailto:${emails.join(',')}?subject=${encodeURIComponent(currentEvent.title + ' - Invite')}&body=${encodeURIComponent(buildMessage(currentEvent))}`;
+            };
+
+            const stats = currentEvent ? {
+                yes: currentEvent.invitees.filter(i => i.status === 'yes').length,
+                no: currentEvent.invitees.filter(i => i.status === 'no').length,
+                pending: currentEvent.invitees.filter(i => i.status === 'pending').length,
+                flaked: currentEvent.invitees.filter(i => i.status === 'yes' && i.attended === false).length,
+            } : { yes: 0, no: 0, pending: 0, flaked: 0 };
+
+            const statusBtnCls = (active, color) => `px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${active ? color : `${inputBgClass} ${subtextColorClass} border-transparent`}`;
+
+            return (
+                <div className={`${mainCardBgClass} p-5 sm:p-6 rounded-2xl shadow-2xl w-[92vw] max-w-[900px] flex flex-col transition-colors duration-500 relative`}>
+                    <button
+                        onClick={onBackToHome}
+                        className="absolute top-4 left-4 px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white font-semibold rounded-lg shadow-md transition-all duration-200 z-10"
+                    >
+                        &larr; Home
+                    </button>
+
+                    <h2 className={`text-3xl font-black text-center mb-6 mt-12 sm:mt-2 ${headingTextColorClass}`}>Invites</h2>
+
+                    {!currentEvent ? (
+                        <>
+                            <div className={`${sectionBgClass} rounded-xl p-4 mb-4`}>
+                                <h3 className={`text-sm font-bold mb-3 ${subtextColorClass}`}>Create New Event</h3>
+                                <input
+                                    type="text"
+                                    placeholder="Event title (e.g. Friday Night Cash Game)"
+                                    value={newEventTitle}
+                                    onChange={(e) => setNewEventTitle(e.target.value)}
+                                    className={`${inputBgClass} ${inputBorderClass} border rounded-lg px-3 py-2 w-full mb-2 ${subtextColorClass}`}
+                                />
+                                <input
+                                    type="date"
+                                    value={newEventDate}
+                                    onChange={(e) => setNewEventDate(e.target.value)}
+                                    className={`${inputBgClass} ${inputBorderClass} border rounded-lg px-3 py-2 w-full mb-3 ${subtextColorClass}`}
+                                />
+                                <button onClick={createEvent} className="w-full py-2 rounded-lg bg-pink-600 hover:bg-pink-700 text-white font-semibold">
+                                    Create Event
+                                </button>
+                            </div>
+
+                            <h3 className={`text-sm font-bold mb-2 ${subtextColorClass}`}>Your Events</h3>
+                            {events.length === 0 && <p className={`text-sm italic ${placeholderColorClass}`}>No events yet — create one above.</p>}
+                            <div className="space-y-2">
+                                {events.map(event => (
+                                    <div key={event.id} className={`${sectionBgClass} rounded-lg p-3 flex items-center justify-between`}>
+                                        <button onClick={() => setCurrentEventId(event.id)} className="text-left flex-grow">
+                                            <div className={`font-semibold ${subtextColorClass}`}>{event.title}</div>
+                                            <div className={`text-xs ${placeholderColorClass}`}>{event.date || 'No date set'} &middot; {event.invitees.length} invited</div>
+                                        </button>
+                                        <button onClick={() => deleteEvent(event.id)} className="text-red-500 text-xs font-semibold px-2">Delete</button>
+                                    </div>
+                                ))}
+                            </div>
+                        </>
+                    ) : (
+                        <>
+                            <button onClick={() => setCurrentEventId(null)} className={`text-sm mb-3 underline text-left ${subtextColorClass}`}>&larr; All Events</button>
+
+                            <div className="mb-4">
+                                <h3 className={`text-xl font-bold ${headingTextColorClass}`}>{currentEvent.title}</h3>
+                                <p className={`text-sm ${placeholderColorClass}`}>{currentEvent.date || 'No date set'}</p>
+                            </div>
+
+                            <div className="grid grid-cols-4 gap-2 mb-4">
+                                <div className={`${sectionBgClass} rounded-lg p-3 text-center`}>
+                                    <div className="text-2xl font-black text-green-500">{stats.yes}</div>
+                                    <div className={`text-[10px] font-semibold uppercase ${placeholderColorClass}`}>Yes</div>
+                                </div>
+                                <div className={`${sectionBgClass} rounded-lg p-3 text-center`}>
+                                    <div className="text-2xl font-black text-red-500">{stats.no}</div>
+                                    <div className={`text-[10px] font-semibold uppercase ${placeholderColorClass}`}>No</div>
+                                </div>
+                                <div className={`${sectionBgClass} rounded-lg p-3 text-center`}>
+                                    <div className="text-2xl font-black text-gray-400">{stats.pending}</div>
+                                    <div className={`text-[10px] font-semibold uppercase ${placeholderColorClass}`}>No Response</div>
+                                </div>
+                                <div className={`${sectionBgClass} rounded-lg p-3 text-center`}>
+                                    <div className="text-2xl font-black text-orange-500">{stats.flaked}</div>
+                                    <div className={`text-[10px] font-semibold uppercase ${placeholderColorClass}`}>Flaked</div>
+                                </div>
+                            </div>
+
+                            <div className="flex gap-2 mb-4">
+                                <button onClick={textAllPending} className="flex-1 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold">
+                                    Text All Pending
+                                </button>
+                                <button onClick={emailAllPending} className="flex-1 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold">
+                                    Email All Pending
+                                </button>
+                            </div>
+
+                            <div className={`${sectionBgClass} rounded-xl p-4 mb-4`}>
+                                <h3 className={`text-sm font-bold mb-3 ${subtextColorClass}`}>Add Invitee</h3>
+                                <input
+                                    type="text"
+                                    placeholder="Name"
+                                    value={newName}
+                                    onChange={(e) => setNewName(e.target.value)}
+                                    className={`${inputBgClass} ${inputBorderClass} border rounded-lg px-3 py-2 w-full mb-2 ${subtextColorClass}`}
+                                />
+                                <div className="flex gap-2 mb-2">
+                                    <button
+                                        onClick={() => setNewContactType('phone')}
+                                        className={`flex-1 py-2 rounded-lg text-sm font-semibold ${newContactType === 'phone' ? 'bg-blue-600 text-white' : `${inputBgClass} ${subtextColorClass}`}`}
+                                    >
+                                        Phone
+                                    </button>
+                                    <button
+                                        onClick={() => setNewContactType('email')}
+                                        className={`flex-1 py-2 rounded-lg text-sm font-semibold ${newContactType === 'email' ? 'bg-blue-600 text-white' : `${inputBgClass} ${subtextColorClass}`}`}
+                                    >
+                                        Email
+                                    </button>
+                                </div>
+                                <input
+                                    type={newContactType === 'phone' ? 'tel' : 'email'}
+                                    placeholder={newContactType === 'phone' ? 'Phone number' : 'Email address'}
+                                    value={newContact}
+                                    onChange={(e) => setNewContact(e.target.value)}
+                                    className={`${inputBgClass} ${inputBorderClass} border rounded-lg px-3 py-2 w-full mb-3 ${subtextColorClass}`}
+                                />
+                                <button onClick={addInvitee} className="w-full py-2 rounded-lg bg-pink-600 hover:bg-pink-700 text-white font-semibold">
+                                    Add to List
+                                </button>
+                            </div>
+
+                            <div className="space-y-2">
+                                {currentEvent.invitees.length === 0 && (
+                                    <p className={`text-sm italic text-center py-6 ${placeholderColorClass}`}>No one invited yet — add someone above.</p>
+                                )}
+                                {currentEvent.invitees.map(invitee => (
+                                    <div key={invitee.id} className={`${sectionBgClass} rounded-lg p-3`}>
+                                        <div className="flex items-center justify-between mb-2 gap-2">
+                                            <div className="min-w-0">
+                                                <div className={`font-semibold truncate ${subtextColorClass}`}>{invitee.name}</div>
+                                                <div className={`text-xs truncate ${placeholderColorClass}`}>{invitee.contact}</div>
+                                            </div>
+                                            <div className="flex items-center gap-2 shrink-0">
+                                                <a
+                                                    href={sendInviteLink(invitee, currentEvent)}
+                                                    className="px-3 py-1.5 rounded-full text-xs font-semibold bg-blue-600 text-white"
+                                                >
+                                                    {invitee.contactType === 'phone' ? 'Text' : 'Email'}
+                                                </a>
+                                                <button onClick={() => removeInvitee(invitee.id)} className="text-red-500 text-xs font-semibold px-1">✕</button>
+                                            </div>
+                                        </div>
+                                        <div className="flex flex-wrap gap-2">
+                                            <button onClick={() => setStatus(invitee.id, 'yes')} className={statusBtnCls(invitee.status === 'yes', 'bg-green-600 text-white')}>Yes</button>
+                                            <button onClick={() => setStatus(invitee.id, 'no')} className={statusBtnCls(invitee.status === 'no', 'bg-red-600 text-white')}>No</button>
+                                            <button onClick={() => setStatus(invitee.id, 'pending')} className={statusBtnCls(invitee.status === 'pending', 'bg-gray-500 text-white')}>No Response</button>
+                                            {invitee.status === 'yes' && (
+                                                <button
+                                                    onClick={() => setAttended(invitee.id, invitee.attended === false ? null : false)}
+                                                    className={statusBtnCls(invitee.attended === false, 'bg-orange-500 text-white')}
+                                                >
+                                                    Flaked
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </>
+                    )}
+                </div>
+            );
+        };
+
+        /**
          * HomeView Component
          * The initial landing page for the application.
          * Allows the user to choose between "High Hand Poker Timer" and "Tournament Clock".
@@ -581,6 +849,12 @@
                             className="w-full px-8 py-4 bg-purple-600 hover:bg-purple-700 text-white font-semibold text-2xl rounded-lg shadow-lg transition-all duration-200 transform hover:scale-105"
                         >
                             Logbook
+                        </button>
+                        <button
+                            onClick={() => onSelectMode('invites')}
+                            className="w-full px-8 py-4 bg-pink-600 hover:bg-pink-700 text-white font-semibold text-2xl rounded-lg shadow-lg transition-all duration-200 transform hover:scale-105"
+                        >
+                            Invites
                         </button>
                     </div>
                 </div>
@@ -4684,6 +4958,23 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
             onThemeChange={setTheme}
             uiScale={uiScale}
             onZoomChange={setUiScale}
+          />
+        </div>
+      )}
+
+      {visitedViews.has('invites') && (
+        <div className={currentView === 'invites' ? '' : 'hidden'}>
+          <InvitesView
+            theme={theme}
+            appBgClass={appBgClass}
+            mainCardBgClass={mainCardBgClass}
+            sectionBgClass={sectionBgClass}
+            inputBgClass={inputBgClass}
+            inputBorderClass={inputBorderClass}
+            subtextColorClass={subtextColorClass}
+            placeholderColorClass={placeholderColorClass}
+            headingTextColorClass={headingTextColorClass}
+            onBackToHome={() => goToView('home')}
           />
         </div>
       )}
