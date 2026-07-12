@@ -76,10 +76,16 @@
       window.__currentUser = null;
       window.__cloudSyncTimeout = null;
 
+      // Settings that should stay local to THIS device/browser rather than
+      // following the account everywhere -- e.g. zoom level, which needs to be
+      // very different on a phone vs. a desktop monitor.
+      window.__DEVICE_LOCAL_KEYS = new Set(['uiScale']);
+
       function __dumpLocalStorage() {
         const dump = {};
         for (let i = 0; i < localStorage.length; i++) {
           const k = localStorage.key(i);
+          if (window.__DEVICE_LOCAL_KEYS.has(k)) continue;
           dump[k] = localStorage.getItem(k);
         }
         return dump;
@@ -105,7 +111,10 @@
             // Use the original (unpatched) setItem so restoring cloud data doesn't
             // immediately queue a redundant push back to the cloud.
             const write = localStorage.setItem.__original || localStorage.setItem.bind(localStorage);
-            Object.keys(data).forEach(k => write(k, data[k]));
+            Object.keys(data).forEach(k => {
+              if (window.__DEVICE_LOCAL_KEYS.has(k)) return;
+              write(k, data[k]);
+            });
           }
         } catch (e) {
           console.error('Cloud pull failed:', e);
