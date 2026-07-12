@@ -2,7 +2,11 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#111827">
     <title>The House Edge</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;700&display=swap" rel="stylesheet">
@@ -25,6 +29,17 @@
       /* Custom font application */
       .font-outfit {
         font-family: 'Outfit', sans-serif;
+      }
+      /* Respect notches / home-indicator areas on phones */
+      body {
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom);
+        padding-left: env(safe-area-inset-left);
+        padding-right: env(safe-area-inset-right);
+      }
+      /* iOS zooms the page in if a focused input's font-size is under 16px; keep it at 16px so typing doesn't jump the zoom level */
+      input, select, textarea {
+        font-size: 16px;
       }
     </style>
 </head>
@@ -127,6 +142,11 @@
       });
     </script>
 
+    <!-- Embedded Tracking app (self-contained, runs inside an isolated iframe) -->
+    <script>
+      const TRACKER_HTML = "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n    <meta charset=\"UTF-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover\">\n    \n    <title>Poker Track Pro</title>\n    <meta name=\"apple-mobile-web-app-capable\" content=\"yes\">\n    <meta name=\"apple-mobile-web-app-status-bar-style\" content=\"black-translucent\">\n    <meta name=\"theme-color\" content=\"#0f172a\">\n    \n    <script src=\"https://cdn.tailwindcss.com\"><\/script>\n    <link href=\"https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap\" rel=\"stylesheet\">\n    \n    <style>\n        :root { --bg-dark: #0f172a; --card-bg: #1e293b; --accent: #3b82f6; }\n        body {\n            font-family: 'Inter', sans-serif;\n            background-color: var(--bg-dark);\n            color: #f8fafc;\n            height: 100vh;\n            display: flex;\n            flex-direction: column;\n            overflow: hidden;\n            touch-action: manipulation;\n            padding-top: env(safe-area-inset-top);\n        }\n        * { -webkit-tap-highlight-color: transparent; user-select: none; }\n        input { user-select: text !important; font-size: 16px !important; }\n        .mono { font-family: 'JetBrains Mono', monospace; }\n        \n        .view { display: none; height: auto; min-height: 100%; flex-direction: column; }\n        .view.active { display: flex; }\n        .glass { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(10px); }\n\n        .toast {\n            position: fixed;\n            top: 60px;\n            left: 50%;\n            transform: translateX(-50%) translateY(-100px);\n            background: #22c55e;\n            color: white;\n            padding: 10px 20px;\n            border-radius: 99px;\n            font-weight: bold;\n            font-size: 12px;\n            z-index: 1000;\n            transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);\n            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);\n        }\n        .toast.show { transform: translateX(-50%) translateY(0); }\n\n        .modal-overlay {\n            display: none;\n            position: fixed;\n            inset: 0;\n            background: rgba(0,0,0,0.85);\n            backdrop-filter: blur(8px);\n            z-index: 200;\n            align-items: center;\n            justify-content: center;\n            padding: 20px;\n        }\n        .modal-overlay.active { display: flex; }\n        \n        .scroll-container {\n            flex-grow: 1;\n            overflow-y: auto;\n            -webkit-overflow-scrolling: touch;\n            padding-bottom: 160px;\n        }\n\n        .live-pulse { animation: pulse 2s infinite; }\n        @keyframes pulse {\n            0% { transform: scale(0.95); opacity: 0.8; }\n            50% { transform: scale(1.05); opacity: 1; }\n            100% { transform: scale(0.95); opacity: 0.8; }\n        }\n\n        .action-menu {\n            position: absolute;\n            right: 0;\n            top: 45px;\n            background: #1e293b;\n            border: 1px solid #334155;\n            border-radius: 12px;\n            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);\n            z-index: 100;\n            overflow: hidden;\n            width: 160px;\n        }\n\n        nav { padding-bottom: calc(24px + env(safe-area-inset-bottom)); }\n\n        .performance-path {\n            fill: none;\n            stroke-width: 2.5;\n            stroke-linecap: round;\n            stroke-linejoin: round;\n        }\n    </style>\n</head>\n<body>\n\n    <div id=\"toast\" class=\"toast\">Action Successful!</div>\n\n    <!-- Edit Player Roster Modal -->\n    <div id=\"roster-edit-modal\" class=\"modal-overlay\">\n        <div class=\"bg-slate-800 w-full max-w-md rounded-3xl p-6 border border-slate-700 shadow-2xl space-y-5 max-h-[85vh] flex flex-col\">\n            <div>\n                <h3 class=\"text-lg font-bold\">Edit Player</h3>\n                <p class=\"text-xs text-slate-400\">Renaming will update all history</p>\n            </div>\n            <div class=\"space-y-4\">\n                <input id=\"edit-roster-name-input\" type=\"text\" class=\"w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 text-slate-100\">\n            </div>\n            <div class=\"flex gap-3 pt-4 border-t border-slate-700 shrink-0\">\n                <button onclick=\"window.deleteFromRoster()\" class=\"px-4 py-3 rounded-xl font-bold text-red-400 bg-red-500/10 hover:bg-red-500/20 transition-colors\">Delete</button>\n                <div class=\"flex-grow\"></div>\n                <button onclick=\"window.closeRosterModal()\" class=\"px-6 py-3 rounded-xl font-bold text-slate-400 bg-slate-700/50\">Cancel</button>\n                <button onclick=\"window.saveRosterName()\" class=\"px-6 py-3 rounded-xl font-bold bg-blue-600 text-white\">Save</button>\n            </div>\n        </div>\n    </div>\n\n    <!-- Edit Session Modal -->\n    <div id=\"history-edit-modal\" class=\"modal-overlay\">\n        <div class=\"bg-slate-800 w-full max-w-md rounded-3xl p-6 border border-slate-700 shadow-2xl space-y-5 max-h-[85vh] flex flex-col\">\n            <div>\n                <h3 class=\"text-lg font-bold\">Edit Session</h3>\n                <p class=\"text-xs text-slate-400\">Modify session data manually</p>\n            </div>\n            <div class=\"space-y-4 overflow-y-auto pr-2\">\n                <div class=\"space-y-1\">\n                    <label class=\"text-[10px] font-black text-slate-500 uppercase\">Title</label>\n                    <input id=\"edit-session-title\" type=\"text\" class=\"w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-slate-100\">\n                </div>\n                <div id=\"edit-session-players\" class=\"space-y-4 pt-2\"></div>\n            </div>\n            <div class=\"flex gap-3 pt-4 border-t border-slate-700 shrink-0\">\n                <button onclick=\"window.closeHistoryModal()\" class=\"flex-grow py-3 rounded-xl font-bold text-slate-400 bg-slate-700/50\">Cancel</button>\n                <button onclick=\"window.saveSessionEdit()\" class=\"flex-grow py-3 rounded-xl font-bold bg-blue-600 text-white\">Save Changes</button>\n            </div>\n        </div>\n    </div>\n\n    <!-- Late Add Player Modal -->\n    <div id=\"late-add-modal\" class=\"modal-overlay\">\n        <div class=\"bg-slate-800 w-full max-w-md rounded-3xl p-6 border border-slate-700 shadow-2xl space-y-5 max-h-[85vh] flex flex-col\">\n            <div><h3 class=\"text-lg font-bold\">Add Player</h3></div>\n            <div class=\"space-y-5 overflow-y-auto flex-grow\">\n                <div class=\"space-y-2\"><label class=\"text-[10px] font-black text-slate-500 uppercase tracking-widest\">New Player</label><div class=\"flex gap-2\"><input id=\"late-player-input\" type=\"text\" placeholder=\"Name...\" class=\"flex-grow bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-slate-100\"><button onclick=\"window.addBrandNewPlayer()\" class=\"bg-blue-600 text-white w-12 h-12 rounded-xl flex items-center justify-center font-bold\">+</button></div></div>\n                <div class=\"space-y-2\"><label class=\"text-[10px] font-black text-slate-500 uppercase tracking-widest\">From Roster</label><div id=\"late-roster-list\" class=\"flex flex-wrap gap-2\"></div></div>\n            </div>\n            <div class=\"pt-4 border-t border-slate-700 shrink-0\"><button onclick=\"window.closeLateAddModal()\" class=\"w-full py-3 rounded-xl font-bold text-slate-400 bg-slate-700/50\">Done</button></div>\n        </div>\n    </div>\n\n    <header class=\"p-4 flex justify-between items-center border-b border-slate-800 glass shrink-0 z-50\">\n        <div class=\"flex items-center gap-2\">\n            <div class=\"w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center shadow-lg shadow-blue-900/20\"><span class=\"text-white font-black text-xs\">P</span></div>\n            <h1 class=\"text-lg font-extrabold tracking-tight\">POKER<span class=\"text-blue-500\">TRACK</span></h1>\n        </div>\n    </header>\n\n    <main class=\"scroll-container\">\n        <!-- Setup View -->\n        <section id=\"view-setup\" class=\"view active p-5 space-y-6\">\n            <div class=\"space-y-4\">\n                <h2 class=\"text-sm font-bold text-slate-500 uppercase tracking-widest\">New Session</h2>\n                <div class=\"bg-slate-800/50 p-4 rounded-2xl border border-slate-700/50\">\n                    <label class=\"block text-xs font-bold text-slate-400 mb-4 uppercase\">Game Mode</label>\n                    <div class=\"grid grid-cols-2 gap-2 bg-slate-900 p-1 rounded-xl\">\n                        <button id=\"mode-cash\" onclick=\"window.setGameMode('cash')\" class=\"py-2.5 rounded-lg text-sm font-bold transition bg-blue-600 text-white shadow-md\">Cash</button>\n                        <button id=\"mode-tourney\" onclick=\"window.setGameMode('tournament')\" class=\"py-2.5 rounded-lg text-sm font-bold transition text-slate-400\">Tournament</button>\n                    </div>\n                </div>\n                \n                <div class=\"bg-slate-800/50 p-4 rounded-2xl border border-slate-700/50 space-y-4\">\n                    <div class=\"flex justify-between items-center\">\n                        <label class=\"block text-xs font-bold text-slate-400 uppercase\">Manage Roster</label>\n                        <button onclick=\"window.toggleRosterEditMode()\" id=\"roster-edit-toggle\" class=\"text-[10px] font-black uppercase text-blue-500 hover:bg-blue-500/10 px-2 py-1 rounded\">Edit Names</button>\n                    </div>\n                    <form id=\"setup-add-form\" class=\"flex gap-2\">\n                        <input id=\"player-input\" type=\"text\" placeholder=\"Add new player...\" class=\"flex-grow bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-slate-100 outline-none\">\n                        <button type=\"submit\" class=\"bg-blue-600 text-white w-12 h-12 rounded-xl flex items-center justify-center font-bold text-2xl\">+</button>\n                    </form>\n                    <div id=\"roster-list\" class=\"flex flex-wrap gap-2 min-h-[40px] content-start\"></div>\n                </div>\n\n                <div class=\"flex justify-between items-center px-1\">\n                    <h3 class=\"text-sm font-bold text-slate-500 uppercase tracking-widest\">Session Participants</h3>\n                    <span id=\"selected-count\" class=\"text-[10px] bg-slate-800 px-2 py-0.5 rounded-full text-slate-400\">0 selected</span>\n                </div>\n            </div>\n            <button id=\"start-btn\" class=\"w-full bg-blue-600 text-white py-4 rounded-2xl font-bold text-lg shadow-xl shadow-blue-900/30\">Start Session</button>\n        </section>\n\n        <!-- Live View -->\n        <section id=\"view-game\" class=\"view p-5 space-y-6\">\n            <div class=\"flex items-center justify-between gap-4\">\n                <div class=\"flex-grow\">\n                    <input type=\"text\" id=\"session-title-input\" class=\"text-2xl font-black text-slate-100 bg-transparent w-full outline-none\" value=\"Live Session\">\n                    <p id=\"game-date-display\" class=\"text-xs text-slate-500 font-medium\"></p>\n                </div>\n                <span id=\"game-mode-badge\" class=\"px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-500 text-[10px] font-black uppercase tracking-widest\"></span>\n            </div>\n            <button onclick=\"window.openLateAddModal()\" class=\"w-full py-3 bg-slate-800/40 border border-dashed border-slate-600 rounded-2xl text-slate-400 font-bold text-xs uppercase tracking-widest flex items-center justify-center gap-2\">+ Add Player</button>\n            <div id=\"active-players-list\" class=\"space-y-3\"></div>\n            <div class=\"bg-slate-900 p-5 rounded-3xl border border-slate-800 shadow-2xl space-y-4\">\n                <div class=\"grid grid-cols-2 gap-4\">\n                    <div><span class=\"text-[10px] font-bold text-slate-500 uppercase block mb-1\">Pot</span><span id=\"total-in\" class=\"text-xl font-black mono text-blue-400\">$0</span></div>\n                    <div class=\"text-right\"><span class=\"text-[10px] font-bold text-slate-500 uppercase block mb-1\">Settled</span><span id=\"total-out\" class=\"text-xl font-black mono text-green-400\">$0</span></div>\n                </div>\n                <div id=\"balance-status\" class=\"p-3 rounded-xl flex items-center justify-center gap-2 bg-slate-800/50 border border-slate-700/50\">\n                    <div id=\"status-icon\" class=\"w-2 h-2 rounded-full bg-slate-600\"></div>\n                    <span id=\"status-text\" class=\"text-[11px] font-bold uppercase tracking-wider text-slate-500\">Awaiting Cash-outs</span>\n                </div>\n            </div>\n            <button onclick=\"window.endGame()\" class=\"w-full bg-slate-100 text-slate-900 py-4 rounded-2xl font-bold\">Save & Finish</button>\n        </section>\n\n        <!-- History View -->\n        <section id=\"view-history\" class=\"view p-5 space-y-6\">\n            <h2 class=\"text-2xl font-black text-slate-100\">History</h2>\n            <div id=\"sessions-list\" class=\"space-y-3\"></div>\n        </section>\n\n        <!-- Stats View -->\n        <section id=\"view-stats\" class=\"view p-5 space-y-6\">\n            <h2 class=\"text-2xl font-black text-slate-100\">Stats</h2>\n            <div class=\"flex flex-wrap gap-2\">\n                <button onclick=\"window.exportToCSV()\" class=\"flex-grow bg-slate-700 text-white px-4 py-3 rounded-xl text-xs font-bold\">Download CSV</button>\n            </div>\n            <div id=\"player-stats-list\" class=\"space-y-3\"></div>\n        </section>\n    </main>\n\n    <nav class=\"fixed bottom-0 left-0 right-0 glass border-t border-slate-800 px-4 pt-3 flex justify-between items-center z-[150]\">\n        <button onclick=\"window.switchView('setup')\" class=\"nav-btn flex flex-col items-center gap-1 text-blue-500\" data-view=\"setup\"><svg class=\"w-6 h-6\" fill=\"currentColor\" viewBox=\"0 0 24 24\"><path d=\"M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11h-4v4h-2v-4H7v-2h4V7h2v4h4v2z\"/></svg><span class=\"text-[9px] font-bold uppercase\">Setup</span></button>\n        <button onclick=\"window.switchView('game')\" class=\"nav-btn flex flex-col items-center gap-1 text-slate-500\" data-view=\"game\"><div class=\"relative\"><svg class=\"w-6 h-6\" fill=\"currentColor\" viewBox=\"0 0 24 24\"><circle cx=\"12\" cy=\"12\" r=\"3\" /><path d=\"M7.5 18.5C6.1 17.1 5.3 15.1 5.3 13C5.3 10.9 6.1 8.9 7.5 7.5L8.9 8.9C7.8 10 7.3 11.4 7.3 13C7.3 14.6 7.8 16 8.9 17.1L7.5 18.5ZM16.5 18.5L15.1 17.1C16.2 16 16.7 14.6 16.7 13C16.7 11.4 16.2 10 15.1 8.9L16.5 7.5C17.9 8.9 18.7 10.9 18.7 13C18.7 15.1 17.9 17.1 16.5 18.5Z\" /></svg><div id=\"live-dot\" class=\"absolute -top-0.5 -right-0.5 w-2 h-2 bg-red-500 rounded-full border border-slate-900 hidden live-pulse\"></div></div><span class=\"text-[9px] font-bold uppercase\">Live</span></button>\n        <button onclick=\"window.switchView('history')\" class=\"nav-btn flex flex-col items-center gap-1 text-slate-500\" data-view=\"history\"><svg class=\"w-6 h-6\" fill=\"currentColor\" viewBox=\"0 0 24 24\"><path d=\"M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z\"/></svg><span class=\"text-[9px] font-bold uppercase\">History</span></button>\n        <button onclick=\"window.switchView('stats')\" class=\"nav-btn flex flex-col items-center gap-1 text-slate-500\" data-view=\"stats\"><svg class=\"w-6 h-6\" fill=\"currentColor\" viewBox=\"0 0 24 24\"><path d=\"M16 11V3H8v6H2v12h20V11h-6zm-6-6h4v14h-4V5zm-6 10h4v4H4v-4zm16 4h-4v-8h4v8z\"/></svg><span class=\"text-[9px] font-bold uppercase\">Stats</span></button>\n    </nav>\n\n    <script>\n        let roster = JSON.parse(localStorage.getItem('poker_pro_roster') || '[]');\n        let history = JSON.parse(localStorage.getItem('poker_pro_history') || '[]');\n        let activePlayers = [];\n        let gameMode = 'cash';\n        let expandedPlayer = null;\n        let expandedHistoryIdx = null;\n        let expandedStatsPlayer = null;\n        let activeMenuIdx = null;\n        let rosterEditMode = false;\n        let currentlyEditingRosterName = null;\n        let currentlyEditingSessionIdx = null;\n\n        const playerInput = document.getElementById('player-input');\n        const sessionTitleInput = document.getElementById('session-title-input');\n        const rosterList = document.getElementById('roster-list');\n        const toast = document.getElementById('toast');\n        const liveDot = document.getElementById('live-dot');\n\t\t\n\tfunction renderActivePlayers() {\n    const al = document.getElementById('active-players-list');\n    if (al) {\n        al.innerHTML = activePlayers.sort((a,b) => a.name.localeCompare(b.name)).map((p, i) => {\n            const pin = p.buyInHistory.reduce((a, b) => a + b, 0), net = p.cashOut - pin;\n            const chips = p.buyInHistory.map((amt, bIdx) => `<div class=\"bg-blue-500/20 border border-blue-500/30 text-blue-400 text-[9px] px-1.5 py-0.5 rounded font-bold flex items-center gap-1\">$${amt}<span onclick=\"event.stopPropagation(); window.removeBuyIn(${i}, ${bIdx})\">\u00d7</span></div>`).join('');\n            return `\n                <div class=\"bg-slate-800 rounded-2xl border ${expandedPlayer === p.name ? 'border-blue-500' : 'border-slate-700/50'}\">\n                    <div class=\"p-4 flex justify-between items-center\" onclick=\"window.togglePlayerExpand('${p.name}')\">\n                        <div class=\"flex items-center gap-3\"><div class=\"w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-[10px] font-black text-slate-400\">${p.name[0]}</div><div><span class=\"font-bold text-slate-100 block\">${p.name}</span><div class=\"flex gap-1 mt-1 flex-wrap\">${chips}</div></div></div>\n                        <div class=\"flex items-center gap-4\"><span class=\"mono font-bold text-sm ${net >= 0 ? 'text-green-400' : 'text-red-400'}\">${net >= 0 ? '' : ''}$${net}</span><svg class=\"w-4 h-4 text-slate-600 ${expandedPlayer === p.name ? 'rotate-180' : ''}\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M19 9l-7 7-7-7\"></path></svg></div>\n                    </div>\n                    <div class=\"${expandedPlayer === p.name ? 'block' : 'hidden'} p-4 pt-0 space-y-4 border-t border-slate-700/30 mt-2\">\n                        <div class=\"grid grid-cols-1 sm:grid-cols-2 gap-3 pt-4\">\n                            <div class=\"space-y-1\">\n                                <label class=\"text-[9px] font-black text-slate-500 uppercase block\">Add Buy-in</label>\n                                <div class=\"flex gap-1\">\n                                    <input id=\"buyin-input-${i}\" type=\"number\" placeholder=\"\" class=\"flex-grow bg-slate-900 border border-slate-700 rounded-l-xl p-2.5 text-sm mono text-white outline-none\">\n                                    <button onclick=\"window.confirmBuyIn(${i})\" class=\"bg-blue-600 px-3 rounded-r-xl text-white font-bold\">+</button>\n                                </div>\n                            </div>\n                            <div class=\"space-y-1\">\n                                <label class=\"text-[9px] font-black text-slate-500 uppercase block\">Cash-out</label>\n                                <div class=\"flex gap-1\">\n                                    <input id=\"cashout-input-${i}\" type=\"number\" value=\"${p.cashOut || ''}\" oninput=\"window.updateCashOut(${i}, this.value)\" placeholder=\"Final\" class=\"flex-grow bg-slate-900 border border-slate-700 rounded-l-xl p-2.5 text-sm mono text-white outline-none\">\n                                    <button onclick=\"window.confirmCashOut(${i})\" class=\"bg-green-600 px-3 rounded-r-xl text-white font-bold\">\u2713</button>\n                                </div>\n                            </div>\n                        </div>\n                    </div>\n                </div>\n            `;\n        }).join('');\n        updateTotals();\n    }\n}\nwindow.confirmBuyIn = function(playerIndex) {\n    const input = document.getElementById(`buyin-input-${playerIndex}`);\n    if (input && input.value) {\n        const amount = parseFloat(input.value) || 0;\n        if (amount > 0) {\n            // Add to buy-in history (adjust if your addBuyIn is different)\n            activePlayers[playerIndex].buyInHistory.push(amount);\n            input.value = '';  // Clear input\n        }\n    }\n    renderActivePlayers();  // Refresh display\n    updateTotals();\n};\n\nwindow.confirmCashOut = function(playerIndex) {\n    const input = document.getElementById(`cashout-input-${playerIndex}`);\n    if (input && input.value) {\n        activePlayers[playerIndex].cashOut = parseFloat(input.value) || 0;\n    }\n    renderActivePlayers();\n    updateTotals();\n};\n\n\n\n        function showToast(msg) {\n            toast.innerText = msg;\n            toast.classList.add('show');\n            setTimeout(() => toast.classList.remove('show'), 2000);\n        }\n\n        function saveState() {\n            localStorage.setItem('poker_pro_roster', JSON.stringify(roster));\n            localStorage.setItem('poker_pro_history', JSON.stringify(history));\n        }\n\n        // --- ROSTER MANAGEMENT ---\n        window.toggleRosterEditMode = () => {\n            rosterEditMode = !rosterEditMode;\n            const btn = document.getElementById('roster-edit-toggle');\n            btn.innerText = rosterEditMode ? 'Done Editing' : 'Edit Names';\n            btn.classList.toggle('text-green-500', rosterEditMode);\n            btn.classList.toggle('text-blue-500', !rosterEditMode);\n            render();\n        };\n\n        window.openRosterEdit = (name) => {\n            currentlyEditingRosterName = name;\n            document.getElementById('edit-roster-name-input').value = name;\n            document.getElementById('roster-edit-modal').classList.add('active');\n        };\n\n        window.closeRosterModal = () => {\n            document.getElementById('roster-edit-modal').classList.remove('active');\n            currentlyEditingRosterName = null;\n        };\n\n        window.saveRosterName = () => {\n            const newName = document.getElementById('edit-roster-name-input').value.trim();\n            if (!newName || newName === currentlyEditingRosterName) { closeRosterModal(); return; }\n            if (roster.includes(newName)) { showToast(\"Name already exists\"); return; }\n            const rIdx = roster.indexOf(currentlyEditingRosterName);\n            if (rIdx > -1) roster[rIdx] = newName;\n            roster.sort();\n            \n            // Update historical names\n            history.forEach(session => { session.players.forEach(p => { if (p.name === currentlyEditingRosterName) p.name = newName; }); });\n            // Update active session names\n            activePlayers.forEach(p => { if (p.name === currentlyEditingRosterName) p.name = newName; });\n            \n            saveState(); closeRosterModal(); render(); showToast(\"Player updated everywhere\");\n        };\n\n        window.deleteFromRoster = () => {\n            if (!currentlyEditingRosterName) return;\n            // Confirm deletion\n            const confirmMsg = `Permanently delete \"${currentlyEditingRosterName}\" from roster?\\n\\nThis won't delete past game history, but they will be removed from the current setup.`;\n            \n            if (confirm(confirmMsg)) {\n                // Filter out from roster array\n                roster = roster.filter(n => n !== currentlyEditingRosterName);\n                // Filter out from active session selection\n                activePlayers = activePlayers.filter(p => p.name !== currentlyEditingRosterName);\n                \n                saveState(); \n                closeRosterModal(); \n                render(); \n                showToast(\"Player removed from roster\");\n            }\n        };\n\n        // --- NAVIGATION ---\n        window.switchView = (id) => {\n            document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));\n            document.getElementById(`view-${id}`).classList.add('active');\n            document.querySelectorAll('.nav-btn').forEach(b => {\n                const isActive = b.dataset.view === id;\n                b.classList.toggle('text-blue-500', isActive);\n                b.classList.toggle('text-slate-500', !isActive);\n            });\n            if (id === 'history') renderHistory();\n            if (id === 'stats') renderStats();\n            if (id === 'game') render();\n            if (id === 'setup') render();\n        };\n\n        document.getElementById('setup-add-form').onsubmit = (e) => {\n            e.preventDefault();\n            const name = playerInput.value.trim();\n            if (!name) return;\n            if (!roster.includes(name)) { roster.push(name); roster.sort(); }\n            if (!activePlayers.find(p => p.name === name)) activePlayers.push({ name, buyInHistory: [], cashOut: 0 });\n            playerInput.value = ''; saveState(); render();\n        };\n\n        window.toggleSelect = (name) => {\n            if (rosterEditMode) { window.openRosterEdit(name); return; }\n            const idx = activePlayers.findIndex(p => p.name === name);\n            if (idx > -1) activePlayers.splice(idx, 1);\n            else activePlayers.push({ name, buyInHistory: [], cashOut: 0 });\n            render();\n        };\n\n        window.setGameMode = (mode) => {\n            gameMode = mode;\n            document.getElementById('mode-cash').className = `py-2.5 rounded-lg text-sm font-bold transition ${mode === 'cash' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400'}`;\n            document.getElementById('mode-tourney').className = `py-2.5 rounded-lg text-sm font-bold transition ${mode === 'tournament' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400'}`;\n        };\n\n        document.getElementById('start-btn').onclick = () => {\n            if (!activePlayers.length) return;\n            sessionTitleInput.value = `Session ${new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;\n            document.getElementById('game-date-display').innerText = new Date().toLocaleDateString();\n            document.getElementById('game-mode-badge').innerText = gameMode;\n            liveDot.classList.remove('hidden');\n            window.switchView('game');\n        };\n\n        // --- LATE ADD ---\n        window.openLateAddModal = () => {\n            const rosterContainer = document.getElementById('late-roster-list');\n            const unselected = roster.filter(name => !activePlayers.some(p => p.name === name));\n            rosterContainer.innerHTML = unselected.map(name => `\n                <button onclick=\"window.addFromLateRoster('${name}')\" class=\"px-4 py-2 rounded-xl text-xs font-bold bg-slate-700/50 border border-slate-600 text-slate-300\">+ ${name}</button>\n            `).join('') || '<p class=\"text-[10px] text-slate-500 italic\">No available players.</p>';\n            document.getElementById('late-add-modal').classList.add('active');\n        };\n        window.closeLateAddModal = () => document.getElementById('late-add-modal').classList.remove('active');\n        window.addFromLateRoster = (name) => {\n            if (!activePlayers.find(p => p.name === name)) { activePlayers.push({ name, buyInHistory: [], cashOut: 0 }); render(); window.openLateAddModal(); }\n        };\n        window.addBrandNewPlayer = () => {\n            const input = document.getElementById('late-player-input');\n            const name = input.value.trim();\n            if (!name) return;\n            if (!roster.includes(name)) { roster.push(name); roster.sort(); }\n            if (!activePlayers.find(p => p.name === name)) { activePlayers.push({ name, buyInHistory: [], cashOut: 0 }); saveState(); render(); input.value = ''; window.openLateAddModal(); }\n        };\n\n        // --- LIVE GAME LOGIC ---\n        window.togglePlayerExpand = (name) => { expandedPlayer = (expandedPlayer === name) ? null : name; render(); };\n        \n\n\n\n        window.removeBuyIn = (pIdx, bIdx) => { activePlayers[pIdx].buyInHistory.splice(bIdx, 1); render(); };\n        window.updateCashOut = (idx, val) => { activePlayers[idx].cashOut = parseInt(val) || 0; updateTotals(); };\n\n        function updateTotals() {\n            let tin = 0, tout = 0;\n            activePlayers.forEach(p => { tin += p.buyInHistory.reduce((a, b) => a + b, 0); tout += p.cashOut; });\n            const ti = document.getElementById('total-in');\n            const to = document.getElementById('total-out');\n            if(ti) ti.innerText = `$${tin}`;\n            if(to) to.innerText = `$${tout}`;\n            \n            const sText = document.getElementById('status-text'), sIcon = document.getElementById('status-icon');\n            if (sText && sIcon) {\n                if (tout === 0) { sText.innerText = \"Awaiting Cash-outs\"; sIcon.className = \"w-2 h-2 rounded-full bg-slate-600\"; }\n                else if (tin === tout) { sText.innerText = \"Balanced\"; sIcon.className = \"w-2 h-2 rounded-full bg-green-500 animate-pulse\"; }\n                else { sText.innerText = (tout > tin) ? `Short $${tout - tin}` : `Surplus $${tin - tout}`; sIcon.className = `w-2 h-2 rounded-full ${(tout > tin) ? 'bg-red-500' : 'bg-blue-500 animate-pulse'}`; }\n            }\n        }\n\n        window.endGame = () => {\n            if (!activePlayers.length) return;\n            history.unshift({\n                id: Date.now(), title: sessionTitleInput.value.trim(),\n                date: new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }),\n                mode: gameMode, pot: activePlayers.reduce((sum, p) => sum + p.buyInHistory.reduce((a,b)=>a+b, 0), 0),\n                totalOut: activePlayers.reduce((sum, p) => sum + p.cashOut, 0), players: JSON.parse(JSON.stringify(activePlayers))\n            });\n            saveState(); activePlayers = []; liveDot.classList.add('hidden'); window.switchView('history');\n        };\n\n        // --- HISTORY ---\n        window.toggleHistoryExpand = (idx) => { expandedHistoryIdx = (expandedHistoryIdx === idx) ? null : idx; renderHistory(); };\n        window.toggleActionMenu = (e, idx) => { e.stopPropagation(); activeMenuIdx = (activeMenuIdx === idx) ? null : idx; renderHistory(); };\n        window.deleteSession = (e, idx) => { e.stopPropagation(); if (confirm(\"Delete this session?\")) { history.splice(idx, 1); saveState(); activeMenuIdx = null; renderHistory(); } };\n        \n        window.openHistoryEdit = (e, idx) => {\n            e.stopPropagation();\n            currentlyEditingSessionIdx = idx;\n            const session = history[idx];\n            document.getElementById('edit-session-title').value = session.title;\n            const container = document.getElementById('edit-session-players');\n            container.innerHTML = session.players.map((p, pIdx) => `\n                <div class=\"space-y-2 p-3 bg-slate-900 rounded-xl border border-slate-700/50\">\n                    <span class=\"font-bold text-slate-300 text-xs\">${p.name}</span>\n                    <div class=\"grid grid-cols-2 gap-2\">\n                        <div><label class=\"text-[8px] uppercase text-slate-500 font-bold block\">Buy-in</label>\n                        <input id=\"edit-p-buyin-${pIdx}\" type=\"number\" value=\"${p.buyInHistory.reduce((a,b)=>a+b, 0)}\" class=\"w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm mono\"></div>\n                        <div><label class=\"text-[8px] uppercase text-slate-500 font-bold block\">Cash-out</label>\n                        <input id=\"edit-p-cashout-${pIdx}\" type=\"number\" value=\"${p.cashOut}\" class=\"w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm mono\"></div>\n                    </div>\n                </div>\n            `).join('');\n            document.getElementById('history-edit-modal').classList.add('active');\n            activeMenuIdx = null;\n            renderHistory();\n        };\n\n        window.closeHistoryModal = () => {\n            document.getElementById('history-edit-modal').classList.remove('active');\n            currentlyEditingSessionIdx = null;\n        };\n\n        window.saveSessionEdit = () => {\n            const s = history[currentlyEditingSessionIdx];\n            s.title = document.getElementById('edit-session-title').value.trim();\n            s.players.forEach((p, pIdx) => {\n                const buyIn = parseInt(document.getElementById(`edit-p-buyin-${pIdx}`).value) || 0;\n                const cashOut = parseInt(document.getElementById(`edit-p-cashout-${pIdx}`).value) || 0;\n                p.buyInHistory = [buyIn]; \n                p.cashOut = cashOut;\n            });\n            s.pot = s.players.reduce((sum, p) => sum + p.buyInHistory[0], 0);\n            s.totalOut = s.players.reduce((sum, p) => sum + p.cashOut, 0);\n            saveState(); closeHistoryModal(); renderHistory(); showToast(\"Session updated\");\n        };\n\n        // --- STATS PERFORMANCE CHART ---\n        function generatePerformanceChart(playerData) {\n            if (playerData.length < 2) return '';\n            \n            let cumulative = 0;\n            const points = [...playerData].reverse().map(p => {\n                const net = p.cashOut - p.buyInHistory.reduce((a,b)=>a+b, 0);\n                cumulative += net;\n                return cumulative;\n            });\n\n            const max = Math.max(...points, 0);\n            const min = Math.min(...points, 0);\n            const range = max - min || 100;\n            const height = 60;\n            const width = 280;\n            const padding = 10;\n            \n            const coords = points.map((p, i) => {\n                const x = (i / (points.length - 1)) * (width - (padding * 2)) + padding;\n                const y = height - (((p - min) / range) * (height - (padding * 2)) + padding);\n                return `${x},${y}`;\n            }).join(' ');\n\n            const color = points[points.length-1] >= 0 ? '#4ade80' : '#f87171';\n\n            return `\n                <div class=\"mt-4 pt-4 border-t border-slate-700/30\">\n                    <span class=\"text-[8px] text-slate-500 font-black uppercase block mb-2 tracking-widest\">Performance Curve</span>\n                    <div class=\"w-full flex justify-center bg-slate-900/60 rounded-xl p-2\">\n                        <svg width=\"${width}\" height=\"${height}\" class=\"overflow-visible\">\n                            <line x1=\"0\" y1=\"${height - (((0 - min) / range) * (height - (padding * 2)) + padding)}\" x2=\"${width}\" y2=\"${height - (((0 - min) / range) * (height - (padding * 2)) + padding)}\" stroke=\"#334155\" stroke-dasharray=\"3,3\" />\n                            <polyline points=\"${coords}\" class=\"performance-path\" stroke=\"${color}\" />\n                            <circle cx=\"${coords.split(' ').pop().split(',')[0]}\" cy=\"${coords.split(' ').pop().split(',')[1]}\" r=\"3\" fill=\"${color}\" />\n                        </svg>\n                    </div>\n                </div>\n            `;\n        }\n\n        // --- RENDERING ---\n        function render() {\n            // Render Roster List (Setup View)\n            if (rosterList) {\n                rosterList.innerHTML = roster.map(n => {\n                    const isSelected = activePlayers.some(p => p.name === n);\n                    return `<button onclick=\"window.toggleSelect('${n}')\" class=\"px-4 py-2 rounded-xl text-xs font-bold border transition flex items-center gap-2 ${isSelected ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-400'}\">${n}${rosterEditMode ? ' \u270e' : ''}</button>`;\n                }).join('');\n            }\n            \n            const selCount = document.getElementById('selected-count');\n            if (selCount) selCount.innerText = `${activePlayers.length} selected`;\n            \n            // Render Active Players (Game View)\n             renderActivePlayers();\n        }\n\n        function renderHistory() {\n            const container = document.getElementById('sessions-list');\n            if (!container) return;\n            container.innerHTML = history.map((s, idx) => {\n                const isExp = expandedHistoryIdx === idx, isMenu = activeMenuIdx === idx;\n                const pRows = s.players.map(p => {\n                    const pin = p.buyInHistory.reduce((a,b)=>a+b,0), net = p.cashOut - pin;\n                    return `<div class=\"flex justify-between py-1.5 border-b border-slate-700/30 text-[11px]\"><span class=\"text-slate-300 font-bold\">${p.name}</span><span class=\"mono ${net >= 0 ? 'text-green-500' : 'text-red-400'} font-black\">${net >= 0 ? '+' : ''}${net}</span></div>`;\n                }).join('');\n                return `\n                    <div class=\"bg-slate-800 rounded-2xl border relative ${isExp ? 'border-blue-500' : 'border-slate-700/50'}\" onclick=\"window.toggleHistoryExpand(${idx})\">\n                        <div class=\"p-4 flex justify-between items-center\">\n                            <div><h4 class=\"text-sm font-bold truncate max-w-[140px]\">${s.title}</h4><p class=\"text-[10px] text-slate-500\">${s.date} \u2022 $${s.pot} Pot</p></div>\n                            <div class=\"flex items-center gap-2\">\n                                <button onclick=\"window.toggleActionMenu(event, ${idx})\" class=\"p-2\"><svg class=\"w-4 h-4 text-slate-400\" fill=\"currentColor\" viewBox=\"0 0 24 24\"><circle cx=\"12\" cy=\"5\" r=\"2\"/><circle cx=\"12\" cy=\"12\" r=\"2\"/><circle cx=\"12\" cy=\"19\" r=\"2\"/></svg></button>\n                            </div>\n                        </div>\n                        <div class=\"action-menu ${isMenu ? '' : 'hidden'}\">\n                            <button onclick=\"window.openHistoryEdit(event, ${idx})\" class=\"w-full text-left px-4 py-3 text-[11px] font-bold text-blue-400 border-b border-slate-700/50\">Edit</button>\n                            <button onclick=\"window.deleteSession(event, ${idx})\" class=\"w-full text-left px-4 py-3 text-[11px] font-bold text-red-400\">Delete</button>\n                        </div>\n                        <div class=\"${isExp ? 'block' : 'hidden'} px-4 pb-4 pt-2 bg-slate-900/30 rounded-b-2xl border-t border-slate-700/20\">${pRows}</div>\n                    </div>\n                `;\n            }).join('') || '<p class=\"text-center py-10 italic text-slate-600\">No sessions yet.</p>';\n        }\n\n        window.toggleStatsExpand = (name) => { expandedStatsPlayer = (expandedStatsPlayer === name) ? null : name; renderStats(); };\n\n        function renderStats() {\n            const container = document.getElementById('player-stats-list');\n            if (!container) return;\n            const stats = roster.map(name => {\n                let tin = 0, tout = 0, games = 0;\n                let sessionHistory = [];\n                history.forEach(h => { \n                    const p = h.players.find(x => x.name === name); \n                    if (p) { \n                        tin += p.buyInHistory.reduce((a,b)=>a+b, 0); \n                        tout += p.cashOut; \n                        games++; \n                        sessionHistory.push(p);\n                    } \n                });\n                return { name, tin, tout, games, profit: tout - tin, sessionHistory };\n            }).sort((a,b) => b.profit - a.profit).filter(s => s.games > 0);\n\n            container.innerHTML = stats.map(s => {\n                const avgProfit = Math.round(s.profit / s.games);\n                const isExp = expandedStatsPlayer === s.name;\n                return `\n                    <div class=\"bg-slate-800 rounded-2xl border transition-all ${isExp ? 'border-blue-500 ring-1 ring-blue-500/20' : 'border-slate-700/50'}\" onclick=\"window.toggleStatsExpand('${s.name}')\">\n                        <div class=\"p-4 flex justify-between items-center\">\n                            <div><h4 class=\"text-sm font-bold text-slate-100\">${s.name}</h4><p class=\"text-[10px] text-slate-500 uppercase font-black tracking-tighter\">${s.games} Sessions</p></div>\n                            <div class=\"flex items-center gap-3\">\n                                <span class=\"mono font-black ${s.profit >= 0 ? 'text-green-400' : 'text-red-400'}\">${s.profit >= 0 ? '+' : ''}$${s.profit}</span>\n                                <svg class=\"w-3 h-3 text-slate-600 transform transition ${isExp ? 'rotate-180' : ''}\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M19 9l-7 7-7-7\"></path></svg>\n                            </div>\n                        </div>\n                        <div class=\"${isExp ? 'block' : 'hidden'} px-4 pb-4 pt-2 border-t border-slate-700/30\">\n                             <div class=\"grid grid-cols-2 gap-4\">\n                                <div class=\"bg-slate-900/40 p-2 rounded-xl border border-slate-700/30\">\n                                    <span class=\"text-[8px] text-slate-500 font-black uppercase block tracking-widest\">Total Buy-in</span>\n                                    <span class=\"text-xs mono font-bold text-blue-400\">$${s.tin}</span>\n                                </div>\n                                <div class=\"bg-slate-900/40 p-2 rounded-xl border border-slate-700/30\">\n                                    <span class=\"text-[8px] text-slate-500 font-black uppercase block tracking-widest\">Total Cashout</span>\n                                    <span class=\"text-xs mono font-bold text-green-400\">$${s.tout}</span>\n                                </div>\n                                <div class=\"bg-slate-900/40 p-2 rounded-xl border border-slate-700/30 col-span-2\">\n                                    <span class=\"text-[8px] text-slate-500 font-black uppercase block tracking-widest\">Avg. Profit / Game</span>\n                                    <span class=\"text-xs mono font-bold ${avgProfit >= 0 ? 'text-green-400' : 'text-red-400'}\">${avgProfit >= 0 ? '+' : ''}$${avgProfit}</span>\n                                </div>\n                             </div>\n                             ${generatePerformanceChart(s.sessionHistory)}\n                        </div>\n                    </div>\n                `;\n            }).join('') || '<p class=\"text-center py-10 italic text-slate-600\">No stats yet.</p>';\n        }\n\n        window.exportToCSV = () => {\n            let csv = \"Date,Session Title,Mode,Player,Total Buy-in,Cash-out,Net Profit\\n\";\n            history.forEach(s => { s.players.forEach(p => { const pin = p.buyInHistory.reduce((a,b)=>a+b,0); csv += `\"${s.date}\",\"${s.title}\",\"${s.mode}\",\"${p.name}\",${pin},${p.cashOut},${p.cashOut-pin}\\n`; }); });\n            const link = document.createElement(\"a\"); link.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv); link.download = 'poker_stats.csv'; link.click();\n        };\n\n        window.onclick = (e) => { if (activeMenuIdx !== null) { activeMenuIdx = null; renderHistory(); } };\n        window.onload = () => { render(); updateTotals(); };\n    <\/script>\n</body>\n</html>";
+    </script>
+
     <!-- Your React Application Components (transpiled by Babel) -->
     <script type="text/babel">
         // Destructure useState, useEffect, useRef from React global object
@@ -190,18 +210,18 @@
 
             return (
                 <>
-                    <div className="fixed top-3 right-3 z-40">
+                    <div className="fixed z-40" style={{ top: 'max(0.75rem, env(safe-area-inset-top))', right: 'max(0.75rem, env(safe-area-inset-right))' }}>
                         {user ? (
                             <button
                                 onClick={() => setOpen(true)}
-                                className={`px-3 py-1.5 rounded-full text-sm font-medium shadow ${isDark ? 'bg-gray-700 text-white' : 'bg-white text-gray-800'} border ${isDark ? 'border-gray-600' : 'border-gray-300'}`}
+                                className={`max-w-[42vw] sm:max-w-none truncate px-3 py-1.5 rounded-full text-xs sm:text-sm font-medium shadow ${isDark ? 'bg-gray-700 text-white' : 'bg-white text-gray-800'} border ${isDark ? 'border-gray-600' : 'border-gray-300'}`}
                             >
                                 {user.email}
                             </button>
                         ) : (
                             <button
                                 onClick={() => { setOpen(true); setMode('login'); resetFormState(); }}
-                                className="px-3 py-1.5 rounded-full text-sm font-medium shadow bg-yellow-500 text-gray-900 hover:bg-yellow-400"
+                                className="px-3 py-1.5 rounded-full text-xs sm:text-sm font-medium shadow bg-yellow-500 text-gray-900 hover:bg-yellow-400 whitespace-nowrap"
                             >
                                 Log In / Sign Up
                             </button>
@@ -422,6 +442,88 @@
         };
 
         /**
+         * ZoomWidget Component
+         * A manual size control, since browser DPI/zoom settings and window width
+         * can make the fixed-width cards look small on some setups. Lets the user
+         * scale the whole app up or down directly; their choice is remembered.
+         */
+        const ZoomWidget = ({ scale, onChange, theme }) => {
+            const isDark = theme === 'dark';
+            const btnCls = `w-8 h-8 flex items-center justify-center rounded-full font-bold text-lg ${isDark ? 'bg-gray-700 text-white hover:bg-gray-600' : 'bg-white text-gray-800 hover:bg-gray-100'} border ${isDark ? 'border-gray-600' : 'border-gray-300'}`;
+            const clamp = (v) => Math.min(2, Math.max(0.6, Math.round(v * 100) / 100));
+            return (
+                <div
+                    className={`fixed z-40 flex items-center gap-1.5 px-1.5 py-1 rounded-full shadow ${isDark ? 'bg-gray-800/90' : 'bg-white/90'} border ${isDark ? 'border-gray-600' : 'border-gray-300'}`}
+                    style={{ bottom: 'max(0.75rem, env(safe-area-inset-bottom))', left: 'max(0.75rem, env(safe-area-inset-left))' }}
+                >
+                    <button onClick={() => onChange(clamp(scale - 0.1))} className={btnCls} aria-label="Zoom out">−</button>
+                    <button
+                        onClick={() => onChange(1)}
+                        className={`px-2 text-xs font-semibold ${isDark ? 'text-gray-200' : 'text-gray-700'}`}
+                        title="Reset size"
+                    >
+                        {Math.round(scale * 100)}%
+                    </button>
+                    <button onClick={() => onChange(clamp(scale + 0.1))} className={btnCls} aria-label="Zoom in">+</button>
+                </div>
+            );
+        };
+
+        /**
+         * TrackingView Component
+         * Embeds the user's separately-built poker tracking app inside an isolated
+         * iframe. Using an iframe (rather than trying to merge two apps' code
+         * together) means the tracker's own vanilla-JS globals and DOM IDs never
+         * collide with this React app's code, and -- combined with keeping this
+         * component permanently mounted at the App level -- its state stays alive
+         * in the background exactly like the Tournament Clock and High Hand timers do.
+         */
+        const TrackingView = ({ onBackToHome, mainCardBgClass }) => {
+            // The iframe is same-origin (no sandbox attribute), so it shares the exact
+            // same localStorage as the rest of the app -- the existing cloud-pull-on-login
+            // logic already restores the tracker's roster/history automatically. The only
+            // extra step needed is to make sure the tracker's OWN writes (via its own,
+            // separate `window` object inside the iframe) also trigger a cloud push,
+            // since our earlier patch on the parent window's localStorage.setItem doesn't
+            // reach into the iframe's separate realm.
+            const handleIframeLoad = (e) => {
+                try {
+                    const iframeWindow = e.target.contentWindow;
+                    const original = iframeWindow.localStorage.setItem.bind(iframeWindow.localStorage);
+                    iframeWindow.localStorage.setItem = function (key, value) {
+                        original(key, value);
+                        if (window.__pushToCloud) window.__pushToCloud();
+                    };
+                } catch (err) {
+                    console.error('Could not hook into Tracking app storage for cloud sync:', err);
+                }
+            };
+
+            return (
+                <div
+                    className={`${mainCardBgClass} w-full sm:w-[70vw] sm:max-w-[620px] sm:rounded-2xl sm:shadow-2xl sm:p-3 flex flex-col transition-colors duration-500 relative`}
+                    style={{ height: '100dvh', maxHeight: '100dvh' }}
+                >
+                    <button
+                        onClick={onBackToHome}
+                        className="absolute left-3 sm:left-6 px-3 py-2 sm:px-4 bg-gray-500 hover:bg-gray-600 text-white text-sm sm:text-base font-semibold rounded-lg shadow-md transition-all duration-200 z-10"
+                        style={{ top: 'max(0.75rem, env(safe-area-inset-top))' }}
+                    >
+                        &larr; Home
+                    </button>
+                    <div className="flex-grow overflow-hidden sm:rounded-xl mt-16 sm:mt-16">
+                        <iframe
+                            srcDoc={TRACKER_HTML}
+                            title="Poker Tracking"
+                            onLoad={handleIframeLoad}
+                            style={{ width: '100%', height: '100%', border: 'none', display: 'block' }}
+                        />
+                    </div>
+                </div>
+            );
+        };
+
+        /**
          * HomeView Component
          * The initial landing page for the application.
          * Allows the user to choose between "High Hand Poker Timer" and "Tournament Clock".
@@ -437,7 +539,7 @@
             const imageUrl = "https://i.imgur.com/bCHijGi.png"; // Updated logo URL
 
             return (
-                <div className={`${mainCardBgClass} p-8 rounded-2xl shadow-2xl w-full max-w-md md:max-w-xl lg:max-w-2xl flex flex-col items-center justify-center transition-colors duration-500`}>
+                <div className={`${mainCardBgClass} p-8 rounded-2xl shadow-2xl w-[92vw] max-w-[640px] flex flex-col items-center justify-center transition-colors duration-500`}>
                     <img
                         src={imageUrl}
                         alt="High Hand Poker Logo"
@@ -462,13 +564,19 @@
                         >
                             Tournament
                         </button>
+                        <button
+                            onClick={() => onSelectMode('tracking')}
+                            className="w-full px-8 py-4 bg-purple-600 hover:bg-purple-700 text-white font-semibold text-2xl rounded-lg shadow-lg transition-all duration-200 transform hover:scale-105"
+                        >
+                            Tracking
+                        </button>
                     </div>
                 </div>
             );
         };
 
         // TournamentClockView: All states, effects, and functions specific to the Tournament Clock
-        const TournamentClockView = ({ theme, appBgClass, mainCardBgClass, sectionBgClass, inputBgClass, inputBorderClass, subtextColorClass, placeholderColorClass, headingTextColorClass, onBackToHome, onThemeChange }) => {
+        const TournamentClockView = ({ theme, appBgClass, mainCardBgClass, sectionBgClass, inputBgClass, inputBorderClass, subtextColorClass, placeholderColorClass, headingTextColorClass, onBackToHome, onThemeChange, uiScale, onZoomChange }) => {
             const [showSettings, setShowSettings] = useState(false);
             const [tournamentSettingsSubView, setTournamentSettingsSubView] = useState('menu');			// 'menu', 'blinds', 'payouts', 'logo', 'theme', 'chipSettings'
 			const [tempPlayersRange, setTempPlayersRange] = useState(null);
@@ -1225,13 +1333,13 @@ stack = Math.round(stack / roundingUnit) * roundingUnit;
             // Modified getLogoStyle to accept either left or right offset
             const getLogoStyle = (topOffset, leftOffset, rightOffset) => {
                 const style = {
-                    top: `${topOffset}vh`,
+                    top: `${topOffset}%`,
                     position: 'absolute'
                 };
                 if (leftOffset !== undefined) {
-                    style.left = `${leftOffset}vw`;
+                    style.left = `${leftOffset}%`;
                 } else if (rightOffset !== undefined) {
-                    style.right = `${rightOffset}vw`;
+                    style.right = `${rightOffset}%`;
                 }
                 return style;
             };
@@ -1732,7 +1840,7 @@ const getPerPlayerCountForChip = (chipId) => {
 
 
             return (
-                <div className={`${mainCardBgClass} p-5 rounded-2xl shadow-2xl w-full max-w-md md:max-w-4xl lg:max-w-6xl flex flex-col transition-colors duration-500 relative`}>
+                <div className={`${mainCardBgClass} p-5 rounded-2xl shadow-2xl w-[92vw] max-w-[1400px] flex flex-col transition-colors duration-500 relative`}>
                     {/* Back to Home Button */}
                     <button
                         onClick={onBackToHome}
@@ -1939,7 +2047,12 @@ const getPerPlayerCountForChip = (chipId) => {
                         )}
 
                         {/* Settings and Fullscreen buttons */}
-                        <div className="flex justify-end space-x-4 flex-shrink-0 mt-4 sm:mt-0">
+                        <div className="flex justify-end items-center space-x-4 flex-shrink-0 mt-4 sm:mt-0">
+                            <div className={`${sectionBgClass} flex items-center gap-0.5 px-1 py-1 rounded-full shadow-md`}>
+                                <button onClick={() => onZoomChange(Math.max(0.6, Math.round((uiScale - 0.1) * 100) / 100))} className={`w-8 h-8 rounded-full flex items-center justify-center text-lg font-bold ${subtextColorClass} hover:bg-black/10`}>−</button>
+                                <button onClick={() => onZoomChange(1)} className={`px-1 text-xs font-semibold w-10 text-center ${subtextColorClass}`} title="Reset size">{Math.round(uiScale * 100)}%</button>
+                                <button onClick={() => onZoomChange(Math.min(2, Math.round((uiScale + 0.1) * 100) / 100))} className={`w-8 h-8 rounded-full flex items-center justify-center text-lg font-bold ${subtextColorClass} hover:bg-black/10`}>+</button>
+                            </div>
                             <button onClick={() => setShowSettings(true)} className={`${sectionBgClass} p-3 rounded-full shadow-md transition-all duration-200 hover:scale-105`}>
                                 <svg xmlns="http://www.w3.org/2000/svg" className={`h-6 w-6 ${subtextColorClass}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.39a2 2 0 00.73 2.73l.08.15a2 2 0 010 2l-.15.25a2 2 0 00-.73 2.73l.22.39a2 2 0 012.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 001 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l-.22-.39a2 2 0 00-.73-2.73l-.08-.15a2 2 0 010-2l.15-.25a2 2 0 00.73-2.73l-.22-.39a2 2 0 01-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25A2 2 0 0013 4.18V2a2 2 0 00-2-2z" />
@@ -2829,7 +2942,7 @@ const getPerPlayerCountForChip = (chipId) => {
                                                         />
                                                     </div>
                                                     <div className="flex items-center space-x-2">
-                                                        <label className={`${subtextColorClass} text-base whitespace-nowrap w-32`}>Logo Top Offset (vh):</label>
+                                                        <label className={`${subtextColorClass} text-base whitespace-nowrap w-32`}>Logo Top Offset (%):</label>
                                                         <NumberSpinner
                                                             value={logoTopOffset}
                                                             min={0} max={90} step={1}
@@ -2840,7 +2953,7 @@ const getPerPlayerCountForChip = (chipId) => {
                                                         />
                                                     </div>
                                                     <div className="flex items-center space-x-2">
-                                                        <label className={`${subtextColorClass} text-base whitespace-nowrap w-32`}>Logo Right Offset (vw):</label>
+                                                        <label className={`${subtextColorClass} text-base whitespace-nowrap w-32`}>Logo Right Offset (%):</label>
                                                         <NumberSpinner
                                                             value={logoRightOffset} // Use right offset state
                                                             min={0} max={90} step={1}
@@ -2930,7 +3043,7 @@ const getPerPlayerCountForChip = (chipId) => {
          * @param {function} props.onBackToHome - Callback to navigate back to the HomeView.
          * @param {function} props.onThemeChange - Callback to change theme (passed from parent App).
          */
-        const HighHandTimerView = ({ theme, appBgClass, mainCardBgClass, sectionBgClass, inputBgClass, inputBorderClass, subtextColorClass, placeholderColorClass, headingTextColorClass, onBackToHome, onThemeChange }) => {
+        const HighHandTimerView = ({ theme, appBgClass, mainCardBgClass, sectionBgClass, inputBgClass, inputBorderClass, subtextColorClass, placeholderColorClass, headingTextColorClass, onBackToHome, onThemeChange, uiScale, onZoomChange }) => {
             // All states and effects from the original App component related to High Hand Timer
             const [showSettings, setShowSettings] = useState(false);
             const [highHandSettingsSubView, setHighHandSettingsSubView] = useState('main'); // 'main', 'logo', 'jackpot', 'additionalGames', 'chipSettings'
@@ -3371,13 +3484,13 @@ useEffect(() => { localStorage.setItem('showSquidGame', JSON.stringify(showSquid
 
             const getLogoStyle = (topOffset, leftOffset, rightOffset) => {
                 const style = {
-                    top: `${topOffset}vh`,
+                    top: `${topOffset}%`,
                     position: 'absolute'
                 };
                 if (leftOffset !== undefined) {
-                    style.left = `${leftOffset}vw`;
+                    style.left = `${leftOffset}%`;
                 } else if (rightOffset !== undefined) {
-                    style.right = `${rightOffset}vw`;
+                    style.right = `${rightOffset}%`;
                 }
                 return style;
             };
@@ -3440,7 +3553,7 @@ useEffect(() => { localStorage.setItem('showSquidGame', JSON.stringify(showSquid
 const [showHighHandSettings, setShowHighHandSettings] = useState(false);
 
        return (
-                <div className={`${mainCardBgClass} p-5 rounded-2xl shadow-2xl w-full max-w-md md:max-w-4xl lg:max-w-6xl flex flex-col transition-colors duration-500 relative`}>
+                <div className={`${mainCardBgClass} p-5 rounded-2xl shadow-2xl w-[92vw] max-w-[1400px] flex flex-col transition-colors duration-500 relative`}>
                     {/* Back to Home Button */}
                     <button
                         onClick={onBackToHome}
@@ -3589,7 +3702,12 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                         )}
 
                         {/* Settings and Fullscreen buttons (Moved to be inline with chip display) */}
-                        <div className="flex justify-end space-x-4 flex-shrink-0 mt-4 sm:mt-0">
+                        <div className="flex justify-end items-center space-x-4 flex-shrink-0 mt-4 sm:mt-0">
+                            <div className={`${sectionBgClass} flex items-center gap-0.5 px-1 py-1 rounded-full shadow-md`}>
+                                <button onClick={() => onZoomChange(Math.max(0.6, Math.round((uiScale - 0.1) * 100) / 100))} className={`w-8 h-8 rounded-full flex items-center justify-center text-lg font-bold ${subtextColorClass} hover:bg-black/10`}>−</button>
+                                <button onClick={() => onZoomChange(1)} className={`px-1 text-xs font-semibold w-10 text-center ${subtextColorClass}`} title="Reset size">{Math.round(uiScale * 100)}%</button>
+                                <button onClick={() => onZoomChange(Math.min(2, Math.round((uiScale + 0.1) * 100) / 100))} className={`w-8 h-8 rounded-full flex items-center justify-center text-lg font-bold ${subtextColorClass} hover:bg-black/10`}>+</button>
+                            </div>
                             <button onClick={() => { setShowSettings(true); setHighHandSettingsSubView('main'); }} className={`${sectionBgClass} p-3 rounded-full shadow-md transition-all duration-200 hover:scale-105`}>
                                 <svg xmlns="http://www.w3.org/2000/svg" className={`h-6 w-6 ${subtextColorClass}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.39a2 2 0 00.73 2.73l.08.15a2 2 0 010 2l-.15.25a2 2 0 00-.73 2.73l.22.39a2 2 0 012.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 001 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l-.22-.39a2 2 0 00-.73-2.73l-.08-.15a2 2 0 010-2l.15-.25a2 2 0 00.73-2.73l-.22-.39a2 2 0 01-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25A2 2 0 0013 4.18V2a2 2 0 00-2-2z" />
@@ -3752,7 +3870,7 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                                         />
                                                     </div>
                                                     <div className="flex items-center space-x-2">
-                                                        <label className={`${subtextColorClass} text-base whitespace-nowrap w-32`}>Logo Top Offset (vh):</label>
+                                                        <label className={`${subtextColorClass} text-base whitespace-nowrap w-32`}>Logo Top Offset (%):</label>
                                                         <NumberSpinner
                                                             value={logoTopOffset}
                                                             min={0} max={90} step={1}
@@ -3763,7 +3881,7 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                                         />
                                                     </div>
                                                     <div className="flex items-center space-x-2">
-                                                        <label className={`${subtextColorClass} text-base whitespace-nowrap w-32`}>Logo Left Offset (vw):</label>
+                                                        <label className={`${subtextColorClass} text-base whitespace-nowrap w-32`}>Logo Left Offset (%):</label>
                                                         <NumberSpinner
                                                             value={logoLeftOffset}
                                                             min={0} max={90} step={1}
@@ -4372,8 +4490,19 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
         function App() {
   console.log("App component rendering");
   const [currentView, setCurrentView] = useState(() => localStorage.getItem('pokerAppCurrentView') || 'home');
+  const [visitedViews, setVisitedViews] = useState(() => new Set([localStorage.getItem('pokerAppCurrentView') || 'home']));
+  const [uiScale, setUiScale] = useState(() => parseFloat(localStorage.getItem('uiScale')) || 1);
+
+  useEffect(() => {
+    localStorage.setItem('uiScale', uiScale.toString());
+  }, [uiScale]);
   const [theme, setTheme] = useState('dark');
   const [authUser, setAuthUser] = useState(() => window.__currentUser);
+
+  const goToView = (view) => {
+    setCurrentView(view);
+    setVisitedViews(prev => (prev.has(view) ? prev : new Set(prev).add(view)));
+  };
 
   useEffect(() => {
     const unsubscribe = window.__firebaseAuth.onAuthStateChanged((user) => {
@@ -4408,7 +4537,7 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
   const headingTextColorClass = theme === 'dark' ? 'text-yellow-400' : 'text-blue-700';
 
   const handleSelectMode = (mode) => {
-    setCurrentView(mode);
+    goToView(mode);
   };
 
   // If you still need this helper, keep it as a separate function
@@ -4476,19 +4605,39 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
           `Max blind: ${maxBigBlind.toLocaleString()} (10× highest chip)`);
   };
 
-  const renderView = () => {
-    switch (currentView) {
-      case 'home':
-        return (
-          <HomeView
-            onSelectMode={handleSelectMode}
-            theme={theme}
-            headingTextColorClass={headingTextColorClass}
-            mainCardBgClass={mainCardBgClass}
-          />
-        );
-      case 'highHand':
-        return (
+  return (
+    <>
+      <div
+        className={`min-h-screen flex flex-col items-center justify-center font-inter transition-colors duration-500 ${appBgClass} ${currentView === 'tracking' ? 'p-0 sm:p-4' : 'p-4'}`}
+        style={{ zoom: uiScale }}
+      >
+        <AuthWidget user={authUser} theme={theme} />
+
+      {/*
+        All views are mounted at all times; only their visibility is toggled.
+        This is what keeps the Tournament Clock and High Hand timers ticking,
+        and the Tracking app's live session intact, while you're on a
+        different tab -- switching away no longer unmounts (and destroys)
+        the view you left.
+      */}
+      {/*
+        Each view only mounts the first time you actually visit it (tracked via
+        visitedViews) -- so nothing runs its startup code before you've ever
+        opened it. Once visited, it stays mounted permanently (just hidden with
+        CSS) so the Tournament Clock, High Hand timer, and Tracking app all keep
+        running in the background while you're on a different tab.
+      */}
+      <div className={currentView === 'home' ? '' : 'hidden'}>
+        <HomeView
+          onSelectMode={handleSelectMode}
+          theme={theme}
+          headingTextColorClass={headingTextColorClass}
+          mainCardBgClass={mainCardBgClass}
+        />
+      </div>
+
+      {visitedViews.has('highHand') && (
+        <div className={currentView === 'highHand' ? '' : 'hidden'}>
           <HighHandTimerView
             theme={theme}
             appBgClass={appBgClass}
@@ -4499,12 +4648,16 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
             subtextColorClass={subtextColorClass}
             placeholderColorClass={placeholderColorClass}
             headingTextColorClass={headingTextColorClass}
-            onBackToHome={() => setCurrentView('home')}
+            onBackToHome={() => goToView('home')}
             onThemeChange={setTheme}
+            uiScale={uiScale}
+            onZoomChange={setUiScale}
           />
-        );
-      case 'tournament':
-        return (
+        </div>
+      )}
+
+      {visitedViews.has('tournament') && (
+        <div className={currentView === 'tournament' ? '' : 'hidden'}>
           <TournamentClockView
             theme={theme}
             appBgClass={appBgClass}
@@ -4515,27 +4668,24 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
             subtextColorClass={subtextColorClass}
             placeholderColorClass={placeholderColorClass}
             headingTextColorClass={headingTextColorClass}
-            onBackToHome={() => setCurrentView('home')}
+            onBackToHome={() => goToView('home')}
             onThemeChange={setTheme}
+            uiScale={uiScale}
+            onZoomChange={setUiScale}
           />
-        );
-      default:
-        return (
-          <HomeView
-            onSelectMode={handleSelectMode}
-            theme={theme}
-            headingTextColorClass={headingTextColorClass}
+        </div>
+      )}
+
+      {visitedViews.has('tracking') && (
+        <div className={currentView === 'tracking' ? '' : 'hidden'}>
+          <TrackingView
+            onBackToHome={() => goToView('home')}
             mainCardBgClass={mainCardBgClass}
           />
-        );
-    }
-  };
-
-  return (
-    <div className={`min-h-screen flex flex-col items-center justify-center p-4 font-inter transition-colors duration-500 ${appBgClass}`}>
-      <AuthWidget user={authUser} theme={theme} />
-      {renderView()}
-    </div>
+        </div>
+      )}
+      </div>
+    </>
   );
 }
 
