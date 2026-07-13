@@ -52,6 +52,15 @@
           align-items: center;
           justify-content: center;
         }
+        /* CSS zoom has a known bug on touchscreens: the visual position of
+           content can drift away from where taps actually register, especially
+           across orientation changes -- showing up as "dead zones" that don't
+           respond to touch. The zoom control was only ever meant to help on
+           desktop monitors (where this bug doesn't happen), so it's switched
+           off entirely on touch devices instead. */
+        .zoom-scale-container {
+          zoom: 1 !important;
+        }
       }
     </style>
 </head>
@@ -5585,7 +5594,7 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
     <>
       <AuthWidget user={authUser} theme={theme} hidden={currentView === 'tracking'} />
       <div
-        className={`min-h-screen flex flex-col items-center font-inter transition-colors duration-500 ${appBgClass} p-4 ${(currentView === 'invites' || currentView === 'tracking') ? 'hidden' : ''}`}
+        className={`zoom-scale-container min-h-screen flex flex-col items-center font-inter transition-colors duration-500 ${appBgClass} p-4 ${(currentView === 'invites' || currentView === 'tracking') ? 'hidden' : ''}`}
         style={{ zoom: uiScale, minHeight: '100dvh', justifyContent: 'safe center' }}
       >
 
