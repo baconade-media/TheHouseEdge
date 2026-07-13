@@ -1177,7 +1177,10 @@
             // Uploads the event's .ics file to Firebase Storage so invitees (who
             // aren't logged in and can't run any app code) can just tap a plain
             // link in their text/email to add it to their own calendar, the same
-            // way the host's own "Add to Calendar" button works locally.
+            // way the host's own "Add to Calendar" button works locally. Also
+            // shortens the resulting link via TinyURL -- SMS/mailto: bodies are
+            // plain text with no way to attach custom "click here" link text, so
+            // a short, clean-looking URL is the best available alternative.
             const uploadICSForEvent = async (event) => {
                 if (!window.__currentUser) return; // requires being logged in (Pro feature)
                 const ics = buildICS(event);
@@ -1187,7 +1190,19 @@
                     const ref = window.__firebaseStorage.ref(path);
                     await ref.putString(ics, 'raw', { contentType: 'text/calendar' });
                     const url = await ref.getDownloadURL();
-                    setEvents(prev => prev.map(e => e.id === event.id ? { ...e, icsUrl: url } : e));
+
+                    let shortUrl = url;
+                    try {
+                        const res = await fetch(`https://tinyurl.com/api-create.php?url=${encodeURIComponent(url)}`);
+                        if (res.ok) {
+                            const text = (await res.text()).trim();
+                            if (text.startsWith('http')) shortUrl = text;
+                        }
+                    } catch (shortenErr) {
+                        console.error('Could not shorten calendar link, using full link instead:', shortenErr);
+                    }
+
+                    setEvents(prev => prev.map(e => e.id === event.id ? { ...e, icsUrl: url, icsShortUrl: shortUrl } : e));
                 } catch (err) {
                     console.error('Could not upload calendar file:', err);
                 }
@@ -1207,7 +1222,8 @@
             // actually sending, so editing your message doesn't require retyping it.
             const getOutgoingMessage = (event) => {
                 const base = getMessage(event);
-                return event.icsUrl ? `${base}\n\nAdd to calendar: ${event.icsUrl}` : base;
+                const link = event.icsShortUrl || event.icsUrl;
+                return link ? `${base}\n\nAdd to calendar: ${link}` : base;
             };
 
             const smsLink = (invitee, event) => `sms:${invitee.phone}?body=${encodeURIComponent(getOutgoingMessage(event))}`;
