@@ -1941,6 +1941,7 @@
 			// NEW: one‑click builder controls
 			const [highestChip, setHighestChip] = useState(1000);   // user’s biggest chip
 			const [targetHours, setTargetHours] = useState(4);      // how many hours they want
+			const [blindGrowthStyle, setBlindGrowthStyle] = useState('balanced'); // 'easy' | 'balanced' | 'aggressive'
 			const [levelMinutes, setLevelMinutes] = useState(15);   // minutes per blind level.
 			const [smallestChip, setSmallestChip] = useState(25);
 			const [useAntes, setUseAntes] = useState(true);
@@ -2149,6 +2150,8 @@
 
             }, []);
 		const [chipPlayers, setChipPlayers] = useState(10);	
+		const [customStackTarget, setCustomStackTarget] = useState(null); // null = follow the auto-suggested stack; a number = user has overridden it
+		const [chipBias, setChipBias] = useState('small'); // 'small' | 'balanced' | 'large' -- which denominations get prioritized
 			
 
 useEffect(() => {
@@ -2717,7 +2720,7 @@ const formatHoursMinutes = (totalSeconds) => {
 //// Computing if the suggested starting stack is able to fit with the number of players and the available chips///
 						
 
-const tryDistributeForTarget = (targetStack, chipPlayers, chipDenominations) => {
+const tryDistributeForTarget = (targetStack, chipPlayers, chipDenominations, bias) => {
   if (!targetStack || targetStack <= 0) return null;
   if (!chipPlayers || chipPlayers <= 0) return null;
   if (!chipDenominations || chipDenominations.length === 0) return null;
@@ -2734,17 +2737,35 @@ const tryDistributeForTarget = (targetStack, chipPlayers, chipDenominations) => 
   );
   if (perPlayerCapByChip.every(cap => cap <= 0)) return null;
 
+  // Which denominations get first dibs on filling the stack -- 'small'
+  // favors more, lower-value chips (a fuller-looking stack, good when
+  // blinds start small); 'large' favors fewer, higher-value chips (a
+  // tidier stack); 'balanced' starts from the middle denomination and
+  // works outward, so no single end dominates.
+  const n = chipsSorted.length;
+  let priorityOrder;
+  if (bias === 'large') {
+    priorityOrder = Array.from({ length: n }, (_, i) => n - 1 - i);
+  } else if (bias === 'balanced') {
+    priorityOrder = [];
+    let lo = Math.floor((n - 1) / 2), hi = lo + 1;
+    while (lo >= 0 || hi < n) {
+      if (lo >= 0) { priorityOrder.push(lo); lo--; }
+      if (hi < n) { priorityOrder.push(hi); hi++; }
+    }
+  } else {
+    priorityOrder = Array.from({ length: n }, (_, i) => i); // 'small' (default)
+  }
+
   const perPlayer = {};
+  chipsSorted.forEach(chip => { perPlayer[chip.id] = 0; });
   let remainingValue = targetStack;
 
-  // Pass 1: prioritize smaller chips
-  for (let i = 0; i < chipsSorted.length; i++) {
+  // Pass 1: fill using the bias-driven priority order.
+  for (const i of priorityOrder) {
     const chip = chipsSorted[i];
     const capPerPlayer = perPlayerCapByChip[i];
-    if (capPerPlayer <= 0) {
-      perPlayer[chip.id] = 0;
-      continue;
-    }
+    if (capPerPlayer <= 0) continue;
 
     const idealCount = Math.floor(remainingValue / chip.value);
     const give = Math.max(0, Math.min(idealCount, capPerPlayer));
@@ -2752,8 +2773,10 @@ const tryDistributeForTarget = (targetStack, chipPlayers, chipDenominations) => 
     remainingValue -= give * chip.value;
   }
 
-  // Pass 2: use bigger chips to top off if still short
-  for (let i = chipsSorted.length - 1; i >= 0 && remainingValue > 0; i--) {
+  // Pass 2: fine-tune/top off any remainder using the reverse priority,
+  // so whichever end wasn't favored in Pass 1 gets a chance to fill the gap.
+  for (const i of [...priorityOrder].reverse()) {
+    if (remainingValue <= 0) break;
     const chip = chipsSorted[i];
     const capPerPlayer = perPlayerCapByChip[i];
     const current = perPlayer[chip.id] || 0;
@@ -2906,10 +2929,12 @@ const rebalanceToIdeal = (ideal, distribution, chipPlayers, chipDenominations) =
 
 
 const computePerPlayerChipDistribution = () => {
-  const ideal =
+  const autoIdeal =
     suggestedStack && typeof suggestedStack === 'object'
       ? suggestedStack.chips
       : suggestedStack;
+
+  const ideal = (customStackTarget !== null && customStackTarget > 0) ? customStackTarget : autoIdeal;
 
   if (!ideal || ideal <= 0) return null;
   if (!chipPlayers || chipPlayers <= 0) return null;
@@ -2930,7 +2955,7 @@ const computePerPlayerChipDistribution = () => {
   for (let delta = 0; Math.abs(delta) <= maxSpan; ) {
     const target = ideal + delta;
     if (target > 0) {
-      const result = tryDistributeForTarget(target, chipPlayers, chipDenominations);
+      const result = tryDistributeForTarget(target, chipPlayers, chipDenominations, chipBias);
       if (result) {
         const diff = Math.abs(target - ideal);
         if (diff < bestDiff) {
@@ -2977,6 +3002,14 @@ const idealStack =
     ? suggestedStack.chips
     : suggestedStack);
 
+// The auto-computed suggestion from the tournament structure, unaffected by
+// any custom stack the user has typed in -- kept separate so it can still be
+// shown as a small reference even after overriding.
+const autoSuggestedStack =
+  suggestedStack && typeof suggestedStack === 'object'
+    ? suggestedStack.chips
+    : suggestedStack;
+
 const effectiveStack = chipDistribution?.effectiveStack ?? idealStack;
 
 const totalValuePerPlayer = chipDistribution
@@ -2995,19 +3028,50 @@ const getPerPlayerCountForChip = (chipId) => {
 				// NEW: build a blind structure with at most 20 levels,
 						// shaped by highestChip, targetHours, levelMinutes, and speed.
 						// Build blind structure based on user parameters
-					const buildBlindLevels = (speed = 'regular') => {
+					// A standard casino/tournament-style blind ladder -- every value here
+					// is a "normal" blind amount you'd actually see on a real structure
+					// sheet. Generated blinds get snapped to the nearest one of these
+					// instead of raw math that can land on odd numbers like 745.
+					const BLIND_LADDER = [
+						25, 50, 75, 100, 150, 200, 300, 400, 500, 600, 800, 1000,
+						1200, 1500, 2000, 2500, 3000, 4000, 5000, 6000, 8000, 10000,
+						12000, 15000, 20000, 25000, 30000, 40000, 50000, 60000, 80000, 100000,
+						120000, 150000, 200000, 250000, 300000, 400000, 500000, 600000, 800000, 1000000
+					];
+
+					const snapToNiceBlind = (value) => {
+						if (!value || value <= 0) return BLIND_LADDER[0];
+						let closest = BLIND_LADDER[0];
+						let minDiff = Math.abs(value - closest);
+						for (const v of BLIND_LADDER) {
+							const diff = Math.abs(value - v);
+							if (diff < minDiff) { minDiff = diff; closest = v; }
+						}
+						return closest;
+					};
+
+					const nextNiceBlindAbove = (value) => {
+						for (const v of BLIND_LADDER) {
+							if (v > value) return v;
+						}
+						return BLIND_LADDER[BLIND_LADDER.length - 1] * 2; // fallback if we ever run off the top
+					};
+
+					const buildBlindLevels = (style = 'balanced') => {
 					  const totalMinutes = targetHours * 60;
 					const levelDuration = levelMinutes;
 
 					// pure time-based level count, no artificial cap
 					const numLevels = Math.floor(totalMinutes / levelDuration);
 
-
-					  // how fast blinds grow
-					  const growthRate = speed === 'turbo' ? 1.9 : 1.7;
+					  // How fast blinds climb level to level -- Easy gives a gentler,
+					  // longer-feeling structure; Aggressive escalates fast; Balanced
+					  // sits in between (this was previously a flat, hidden percentage).
+					  const growthRate = style === 'aggressive' ? 2.1 : style === 'easy' ? 1.4 : 1.7;
 
 					  const levelsOut = [];
 					  let bb = smallestChip * 2; // start at 2× smallest chip (e.g. 25→50 BB)
+					  const maxBB = highestChip * 40;
 
 					  for (let i = 0; i < numLevels; i++) {
 						// add a 10‑min break every 5th level (optional)
@@ -3023,126 +3087,67 @@ const getPerPlayerCountForChip = (chipId) => {
 						  });
 						}
 
-									// choose a base small blind from current bb estimate
-					let sb = Math.max(
-					  smallestChip,
-					  Math.round((bb / 2) / smallestChip) * smallestChip
-					);
+						// Snap the raw estimate to the nearest standard poker blind value
+						// (25, 50, 75, 100, 150, 200, 300...) instead of raw arithmetic
+						// that can land on an odd number like 745.
+						let sb = snapToNiceBlind(bb / 2);
+						let bbFinal = sb * 2;
 
-					// force BB to be exactly double
-					let bbClean = sb * 2;
-
-					// minimum blinds
-					if (bbClean < smallestChip * 2) {
-					  sb = smallestChip;
-					  bbClean = smallestChip * 2;
-					}
-
-					// If blinds are getting big, snap to 100-multiples
-					if (bbClean > 200) {
-					  sb = Math.round(sb / 100) * 100;
-					  bbClean = sb * 2;
-					}
-
-					// Cap BB at 40 × highest chip denomination
-					const maxBB = highestChip * 40;
-					let bbFinal = bbClean;
-					if (bbFinal > maxBB) {
-					  bbFinal = maxBB;
-					  // keep SB exactly half of BB when capped
-					  sb = bbFinal / 2;
-					}
-
-					// If SB or BB are over 1000, round to nearest 500
-					if (sb > 1000) {
-					  sb = Math.round(sb / 500) * 500;
-					  bbFinal = sb * 2;
-					}
-					if (bbFinal > 1000) {
-					  bbFinal = Math.round(bbFinal / 500) * 500;
-					  sb = bbFinal / 2;
-					}
-
-					// antes start halfway through, ~10% of BB
-					let ante = 0;
-					if (useAntes && i >= Math.floor(numLevels / 2)) {
-					  ante = Math.round((bbFinal * 0.1) / smallestChip) * smallestChip;
-					}
-
-					// ---- DUPLICATE / NON‑DECREASING PROTECTION ----
-
-					// Get last non-break blind level
-					const lastBlind = [...levelsOut].reverse().find(l => !l.isBreak);
-
-					if (lastBlind) {
-					  // If antes are OFF, avoid exact duplicate SB/BB
-					  if (!useAntes && lastBlind.sb === sb && lastBlind.bb === bbFinal) {
-						sb = Math.round((sb * growthRate) / smallestChip) * smallestChip;
-						bbFinal = sb * 2;
-
-						// re-apply rounding/cap rules
-						if (bbFinal > 200) {
-						  sb = Math.round(sb / 100) * 100;
-						  bbFinal = sb * 2;
-						}
+						// Cap BB at 40 × highest chip denomination
 						if (bbFinal > maxBB) {
-						  bbFinal = maxBB;
-						  sb = bbFinal / 2;
-						}
-						if (sb > 1000) {
-						  sb = Math.round(sb / 500) * 500;
+						  sb = snapToNiceBlind(maxBB / 2);
 						  bbFinal = sb * 2;
+						  if (bbFinal > maxBB) {
+							// maxBB itself didn't land on a ladder rung -- step down one
+							// rung so the cap is still respected exactly.
+							const idx = BLIND_LADDER.indexOf(sb);
+							sb = idx > 0 ? BLIND_LADDER[idx - 1] : sb;
+							bbFinal = sb * 2;
+						  }
 						}
-						if (bbFinal > 1000) {
-						  bbFinal = Math.round(bbFinal / 500) * 500;
-						  sb = bbFinal / 2;
-						}
-					  }
 
-					  // Ensure blinds never go down
-					  if (sb <= lastBlind.sb || bbFinal <= lastBlind.bb) {
-						sb = Math.round((lastBlind.sb * growthRate) / smallestChip) * smallestChip;
-						bbFinal = sb * 2;
-
-						// re-apply rounding/cap rules
-						if (bbFinal > 200) {
-						  sb = Math.round(sb / 100) * 100;
-						  bbFinal = sb * 2;
+						// antes start halfway through, roughly 10% of BB, also snapped
+						let ante = 0;
+						if (useAntes && i >= Math.floor(numLevels / 2)) {
+						  ante = snapToNiceBlind(bbFinal * 0.1);
 						}
-						if (bbFinal > maxBB) {
-						  bbFinal = maxBB;
-						  sb = bbFinal / 2;
-						}
-						if (sb > 1000) {
-						  sb = Math.round(sb / 500) * 500;
-						  bbFinal = sb * 2;
-						}
-						if (bbFinal > 1000) {
-						  bbFinal = Math.round(bbFinal / 500) * 500;
-						  sb = bbFinal / 2;
-						}
-					  }
 
-					  // If this level would still be identical AND BB is at the cap,
-					  // extend the last level instead of adding a duplicate
-					  if (bbFinal === lastBlind.bb && sb === lastBlind.sb && bbFinal === maxBB) {
-						lastBlind.duration += levelDuration; // extend last level
-						continue; // skip pushing a new one
-					  }
-					}
+						// ---- DUPLICATE / NON‑DECREASING PROTECTION ----
+						const lastBlind = [...levelsOut].reverse().find(l => !l.isBreak);
 
-					// Finally push the level
-					levelsOut.push({
-					  id: crypto.randomUUID(),
-					  sb,
-					  bb: bbFinal,
-					  ante,
-					  duration: levelDuration,
-					  isBreak: false,
-					});
+						if (lastBlind) {
+						  // Blinds must always climb -- if rounding collapsed this level
+						  // into the same value (or lower) than the last one, jump to
+						  // the next rung on the ladder instead.
+						  if (sb <= lastBlind.sb || bbFinal <= lastBlind.bb) {
+							sb = nextNiceBlindAbove(lastBlind.sb);
+							bbFinal = sb * 2;
+							if (bbFinal > maxBB) {
+							  bbFinal = maxBB;
+							  sb = bbFinal / 2;
+							}
+						  }
 
-					// increase for next level
-					bb = bb * growthRate;
+						  // If we're still stuck at the cap and can't climb any further,
+						  // extend the previous level's duration instead of pushing a duplicate.
+						  if (bbFinal === lastBlind.bb && sb === lastBlind.sb && bbFinal === maxBB) {
+							lastBlind.duration += levelDuration;
+							continue;
+						  }
+						}
+
+						// Finally push the level
+						levelsOut.push({
+						  id: crypto.randomUUID(),
+						  sb,
+						  bb: bbFinal,
+						  ante,
+						  duration: levelDuration,
+						  isBreak: false,
+						});
+
+						// increase for next level
+						bb = bb * growthRate;
 
 					  }
 
@@ -3159,7 +3164,7 @@ const getPerPlayerCountForChip = (chipId) => {
 						alert('Please set Highest Chip, Hours, and Level Minutes first');
 						return;
 					  }
-					  const newLevels = buildBlindLevels('regular');
+					  const newLevels = buildBlindLevels(blindGrowthStyle);
 					  setLevels(newLevels);
 					  setCurrentLevelIndex(0);
 					  setTimeRemaining(newLevels[0]?.duration * 60 || 900);
@@ -3900,6 +3905,19 @@ const getPerPlayerCountForChip = (chipId) => {
 												  className="w-32 px-3 py-2 rounded-lg bg-gray-700 border-2 border-gray-600 text-white text-center font-bold text-lg focus:border-yellow-400 focus:outline-none"
 												/>
 											  </div>
+
+											  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+												<label className="text-gray-200 font-semibold text-base md:text-lg whitespace-nowrap">Blind Increase Style:</label>
+												<select
+												  value={blindGrowthStyle}
+												  onChange={(e) => setBlindGrowthStyle(e.target.value)}
+												  className="w-full md:w-56 px-3 py-2 rounded-lg bg-gray-700 border-2 border-gray-600 text-white font-semibold text-base focus:border-yellow-400 focus:outline-none"
+												>
+												  <option value="easy">Easy (gentle, longer-feeling)</option>
+												  <option value="balanced">Balanced</option>
+												  <option value="aggressive">Aggressive (climbs fast)</option>
+												</select>
+											  </div>
 											  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
 										  <label className="text-gray-200 font-semibold text-base md:text-lg whitespace-nowrap">
 											Use Antes:
@@ -4131,8 +4149,26 @@ const getPerPlayerCountForChip = (chipId) => {
                                                         />
                                                     </div>
                                                     <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center`}>
-                                                        <span className={`text-xs font-semibold ${subtextColorClass} mb-1.5`}>Suggested Starting Stack</span>
-                                                        <span className="text-lg font-bold text-white">{idealStack?.toLocaleString() ?? '—'}</span>
+                                                        <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5`}>Target Starting Stack</label>
+                                                        <input
+                                                            type="number"
+                                                            min="0"
+                                                            step="1"
+                                                            value={customStackTarget !== null ? customStackTarget : (autoSuggestedStack ?? '')}
+                                                            onChange={(e) => {
+                                                                const v = e.target.value;
+                                                                setCustomStackTarget(v === '' ? null : (parseInt(v) || 0));
+                                                            }}
+                                                            className="w-full px-3 py-2 rounded-md bg-gray-900/80 border border-yellow-400/70 text-yellow-200 font-semibold text-lg focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                                                        />
+                                                        <div className="flex items-center justify-between mt-1.5">
+                                                            <span className="text-[11px] text-gray-400">Suggested: {autoSuggestedStack?.toLocaleString() ?? '—'}</span>
+                                                            {customStackTarget !== null && (
+                                                                <button onClick={() => setCustomStackTarget(null)} className="text-[11px] text-blue-400 underline">
+                                                                    Reset
+                                                                </button>
+                                                            )}
+                                                        </div>
                                                     </div>
                                                     <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center`}>
                                                         <span className={`text-xs font-semibold ${subtextColorClass} mb-1.5`}>Achievable With Your Chips</span>
@@ -4145,6 +4181,19 @@ const getPerPlayerCountForChip = (chipId) => {
                                                             <span className="text-lg font-bold text-gray-500">—</span>
                                                         )}
                                                     </div>
+                                                </div>
+
+                                                <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center mt-3`}>
+                                                    <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5`}>Chip Distribution Style</label>
+                                                    <select
+                                                        value={chipBias}
+                                                        onChange={(e) => setChipBias(e.target.value)}
+                                                        className="w-full px-3 py-2 rounded-md bg-gray-900/80 border border-yellow-400/70 text-yellow-200 font-semibold focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                                                    >
+                                                        <option value="small">More small chips (fuller-looking stack)</option>
+                                                        <option value="balanced">Balanced mix</option>
+                                                        <option value="large">Fewer, bigger chips (tidier stack)</option>
+                                                    </select>
                                                 </div>
                                             </div>
 
