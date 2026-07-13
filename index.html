@@ -2152,6 +2152,14 @@
 		const [chipPlayers, setChipPlayers] = useState(10);	
 		const [customStackTarget, setCustomStackTarget] = useState(null); // null = follow the auto-suggested stack; a number = user has overridden it
 		const [chipBias, setChipBias] = useState('small'); // 'small' | 'balanced' | 'large' -- which denominations get prioritized
+		const [chipPresets, setChipPresets] = useState(() => {
+			try { return JSON.parse(localStorage.getItem('pokerChipPresets') || '[]'); } catch (e) { return []; }
+		});
+		const [newPresetName, setNewPresetName] = useState('');
+
+		useEffect(() => {
+			localStorage.setItem('pokerChipPresets', JSON.stringify(chipPresets));
+		}, [chipPresets]);
 			
 
 useEffect(() => {
@@ -2688,6 +2696,48 @@ stack = Math.round(stack / roundingUnit) * roundingUnit;
                 setChipDenominations(prevChips => prevChips.filter(chip => chip.id !== id));
             };
 
+            // --- Chip Set Presets (save/load whole denomination sets, since
+            // different tournament nights may use physically different chip sets) ---
+            const saveCurrentAsPreset = () => {
+                const name = newPresetName.trim();
+                if (!name) { alert('Enter a name for this chip set first.'); return; }
+                if (!chipDenominations.length) { alert('Add at least one chip denomination first.'); return; }
+                const preset = {
+                    id: Date.now().toString(),
+                    name,
+                    denominations: chipDenominations.map(c => ({ value: c.value, color: c.color, quantity: c.quantity || 0 }))
+                };
+                setChipPresets(prev => [...prev, preset]);
+                setNewPresetName('');
+            };
+
+            const loadChipPreset = (presetId) => {
+                const preset = chipPresets.find(p => p.id === presetId);
+                if (!preset) return;
+                if (chipDenominations.length > 0 && !confirm(`Load "${preset.name}"? This replaces your current chip set.`)) return;
+                setChipDenominations(preset.denominations.map(d => ({
+                    id: crypto.randomUUID(),
+                    value: d.value,
+                    color: d.color,
+                    quantity: d.quantity
+                })));
+            };
+
+            const renameChipPreset = (presetId) => {
+                const preset = chipPresets.find(p => p.id === presetId);
+                if (!preset) return;
+                const newName = prompt('Rename this chip set:', preset.name);
+                if (!newName || !newName.trim()) return;
+                setChipPresets(prev => prev.map(p => p.id === presetId ? { ...p, name: newName.trim() } : p));
+            };
+
+            const deleteChipPreset = (presetId) => {
+                const preset = chipPresets.find(p => p.id === presetId);
+                if (!preset) return;
+                if (!confirm(`Delete the "${preset.name}" chip set preset? This can't be undone.`)) return;
+                setChipPresets(prev => prev.filter(p => p.id !== presetId));
+            };
+
             // Modified getLogoStyle to accept either left or right offset
             const getLogoStyle = (topOffset, leftOffset, rightOffset) => {
                 const style = {
@@ -2737,57 +2787,103 @@ const tryDistributeForTarget = (targetStack, chipPlayers, chipDenominations, bia
   );
   if (perPlayerCapByChip.every(cap => cap <= 0)) return null;
 
-  // Which denominations get first dibs on filling the stack -- 'small'
-  // favors more, lower-value chips (a fuller-looking stack, good when
-  // blinds start small); 'large' favors fewer, higher-value chips (a
-  // tidier stack); 'balanced' starts from the middle denomination and
-  // works outward, so no single end dominates.
   const n = chipsSorted.length;
-  let priorityOrder;
-  if (bias === 'large') {
-    priorityOrder = Array.from({ length: n }, (_, i) => n - 1 - i);
-  } else if (bias === 'balanced') {
-    priorityOrder = [];
-    let lo = Math.floor((n - 1) / 2), hi = lo + 1;
-    while (lo >= 0 || hi < n) {
-      if (lo >= 0) { priorityOrder.push(lo); lo--; }
-      if (hi < n) { priorityOrder.push(hi); hi++; }
-    }
-  } else {
-    priorityOrder = Array.from({ length: n }, (_, i) => i); // 'small' (default)
-  }
-
   const perPlayer = {};
   chipsSorted.forEach(chip => { perPlayer[chip.id] = 0; });
   let remainingValue = targetStack;
 
-  // Pass 1: fill using the bias-driven priority order.
-  for (const i of priorityOrder) {
-    const chip = chipsSorted[i];
-    const capPerPlayer = perPlayerCapByChip[i];
-    if (capPerPlayer <= 0) continue;
-
-    const idealCount = Math.floor(remainingValue / chip.value);
-    const give = Math.max(0, Math.min(idealCount, capPerPlayer));
-    perPlayer[chip.id] = give;
-    remainingValue -= give * chip.value;
+  // Reserve a practical minimum of the smallest chip up front, regardless
+  // of style -- even "fewer, bigger chips" shouldn't mean *zero* small
+  // chips, since you need some to post the actual starting blind and make
+  // change early on. This looks up the tournament's real Level 1 blind, so
+  // there's always enough small change on hand to post it a couple of
+  // times over. The rest of the stack still follows the chosen style.
+  const capRemainingByChip = [...perPlayerCapByChip];
+  {
+    const smallest = chipsSorted[0];
+    const smallestCap = capRemainingByChip[0];
+    const firstBlindLevel = levels.find(l => !l.isBreak && l.sb > 0);
+    const startingSB = firstBlindLevel ? firstBlindLevel.sb : smallest.value;
+    const desiredMin = Math.min(
+      smallestCap,
+      Math.ceil((startingSB * 2) / smallest.value),
+      Math.floor(remainingValue / smallest.value)
+    );
+    if (desiredMin > 0) {
+      perPlayer[smallest.id] = desiredMin;
+      remainingValue -= desiredMin * smallest.value;
+      capRemainingByChip[0] -= desiredMin;
+    }
   }
 
-  // Pass 2: fine-tune/top off any remainder using the reverse priority,
-  // so whichever end wasn't favored in Pass 1 gets a chance to fill the gap.
-  for (const i of [...priorityOrder].reverse()) {
-    if (remainingValue <= 0) break;
-    const chip = chipsSorted[i];
-    const capPerPlayer = perPlayerCapByChip[i];
-    const current = perPlayer[chip.id] || 0;
-    const remainingCap = capPerPlayer - current;
-    if (remainingCap <= 0) continue;
+  if (bias === 'balanced') {
+    // Genuinely proportional across all denominations (beyond the reserved
+    // baseline above), so no single chip dominates or gets skipped.
+    const shareTarget = remainingValue / n;
+    chipsSorted.forEach((chip, i) => {
+      const cap = capRemainingByChip[i];
+      if (cap <= 0) return;
+      const idealCount = Math.floor(shareTarget / chip.value);
+      const give = Math.max(0, Math.min(idealCount, cap));
+      perPlayer[chip.id] += give;
+      remainingValue -= give * chip.value;
+      capRemainingByChip[i] -= give;
+    });
+    // Fill any remainder smallest-first...
+    for (let i = 0; i < n && remainingValue > 0; i++) {
+      const chip = chipsSorted[i];
+      const cap = capRemainingByChip[i];
+      if (cap <= 0) continue;
+      const maxNeeded = Math.floor(remainingValue / chip.value);
+      const add = Math.min(cap, maxNeeded);
+      if (add > 0) {
+        perPlayer[chip.id] += add;
+        remainingValue -= add * chip.value;
+        capRemainingByChip[i] -= add;
+      }
+    }
+    // ...then largest-first for any final stragglers.
+    for (let i = n - 1; i >= 0 && remainingValue > 0; i--) {
+      const chip = chipsSorted[i];
+      const cap = capRemainingByChip[i];
+      if (cap <= 0) continue;
+      const maxNeeded = Math.floor(remainingValue / chip.value);
+      const add = Math.min(cap, maxNeeded);
+      if (add > 0) {
+        perPlayer[chip.id] += add;
+        remainingValue -= add * chip.value;
+        capRemainingByChip[i] -= add;
+      }
+    }
+  } else {
+    // 'small' favors more, lower-value chips first; 'large' favors fewer,
+    // higher-value chips first.
+    const priorityOrder = bias === 'large'
+      ? Array.from({ length: n }, (_, i) => n - 1 - i)
+      : Array.from({ length: n }, (_, i) => i);
 
-    const maxNeeded = Math.floor(remainingValue / chip.value);
-    const add = Math.min(remainingCap, maxNeeded);
-    if (add > 0) {
-      perPlayer[chip.id] = current + add;
-      remainingValue -= add * chip.value;
+    for (const i of priorityOrder) {
+      const chip = chipsSorted[i];
+      const cap = capRemainingByChip[i];
+      if (cap <= 0) continue;
+      const idealCount = Math.floor(remainingValue / chip.value);
+      const give = Math.max(0, Math.min(idealCount, cap));
+      perPlayer[chip.id] += give;
+      remainingValue -= give * chip.value;
+      capRemainingByChip[i] -= give;
+    }
+    for (const i of [...priorityOrder].reverse()) {
+      if (remainingValue <= 0) break;
+      const chip = chipsSorted[i];
+      const cap = capRemainingByChip[i];
+      if (cap <= 0) continue;
+      const maxNeeded = Math.floor(remainingValue / chip.value);
+      const add = Math.min(cap, maxNeeded);
+      if (add > 0) {
+        perPlayer[chip.id] += add;
+        remainingValue -= add * chip.value;
+        capRemainingByChip[i] -= add;
+      }
     }
   }
 
@@ -4132,8 +4228,47 @@ const getPerPlayerCountForChip = (chipId) => {
                                                 </label>
                                             </div>
 
-                                            {/* Summary panel: players + suggested stack + achievable stack, as clean stat cards */}
-                                            <div className="rounded-xl border border-yellow-400/50 bg-yellow-500/5 p-4">
+                                            {/* Chip Set Presets -- save/load whole denomination sets, since
+                                                different tournament nights may use physically different chips */}
+                                            <div className={`${sectionBgClass} rounded-lg p-3`}>
+                                                <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5 block`}>Chip Set Presets</label>
+                                                <select
+                                                    value=""
+                                                    onChange={(e) => { if (e.target.value) loadChipPreset(e.target.value); }}
+                                                    className={`w-full px-3 py-2 rounded-md ${inputBgClass} ${inputBorderClass} border ${subtextColorClass} mb-2`}
+                                                >
+                                                    <option value="">Load a saved chip set…</option>
+                                                    {chipPresets.map(p => (
+                                                        <option key={p.id} value={p.id}>{p.name} ({p.denominations.length} chips)</option>
+                                                    ))}
+                                                </select>
+                                                <div className="flex gap-2">
+                                                    <input
+                                                        type="text"
+                                                        placeholder="Name this chip set…"
+                                                        value={newPresetName}
+                                                        onChange={(e) => setNewPresetName(e.target.value)}
+                                                        className={`flex-grow px-3 py-2 rounded-md ${inputBgClass} ${inputBorderClass} border ${subtextColorClass}`}
+                                                    />
+                                                    <button onClick={saveCurrentAsPreset} className="px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold whitespace-nowrap">
+                                                        Save Current
+                                                    </button>
+                                                </div>
+                                                {chipPresets.length > 0 && (
+                                                    <div className="mt-3 space-y-1.5">
+                                                        {chipPresets.map(p => (
+                                                            <div key={p.id} className={`flex items-center justify-between text-xs ${subtextColorClass} ${inputBgClass} rounded-md px-3 py-2`}>
+                                                                <span className="truncate">{p.name}</span>
+                                                                <div className="flex gap-3 shrink-0 ml-2">
+                                                                    <button onClick={() => renameChipPreset(p.id)} className="text-blue-400 underline">Rename</button>
+                                                                    <button onClick={() => deleteChipPreset(p.id)} className="text-red-400 underline">Delete</button>
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+
                                                 <p className="text-xs font-bold text-yellow-300 uppercase tracking-wide mb-3">
                                                     Enter number of players and how many of each chip you own
                                                 </p>
@@ -4501,6 +4636,83 @@ const getPerPlayerCountForChip = (chipId) => {
                 const savedShowChipDisplay = localStorage.getItem('showPokerChipDisplay');
                 return savedShowChipDisplay !== null ? JSON.parse(savedShowChipDisplay) : true;
             });
+
+            // --- Cash Game chip allocation calculator ---
+            // No blind structure to reference here (unlike Tournament), so this
+            // is driven by a buy-in range and the actual table stakes instead.
+            const [cashMinBuyIn, setCashMinBuyIn] = useState(() => parseFloat(localStorage.getItem('cashMinBuyIn')) || 20);
+            const [cashMaxBuyIn, setCashMaxBuyIn] = useState(() => parseFloat(localStorage.getItem('cashMaxBuyIn')) || 100);
+            const [cashSB, setCashSB] = useState(() => parseFloat(localStorage.getItem('cashSB')) || 0.25);
+            const [cashBB, setCashBB] = useState(() => parseFloat(localStorage.getItem('cashBB')) || 0.50);
+            const [chipPlayers, setChipPlayers] = useState(() => parseInt(localStorage.getItem('cashChipPlayers')) || 9);
+            const [selectedBuyIn, setSelectedBuyIn] = useState(cashMaxBuyIn); // the wheel-picked value between min/max buy-in
+            const buyInWheelRef = useRef(null);
+            const [chipBias, setChipBias] = useState('small'); // 'small' | 'balanced' | 'large'
+            const [chipPresets, setChipPresets] = useState(() => {
+                try { return JSON.parse(localStorage.getItem('pokerCashChipPresets') || '[]'); } catch (e) { return []; }
+            });
+            const [newPresetName, setNewPresetName] = useState('');
+
+            useEffect(() => {
+                localStorage.setItem('cashMinBuyIn', cashMinBuyIn);
+                localStorage.setItem('cashMaxBuyIn', cashMaxBuyIn);
+                localStorage.setItem('cashSB', cashSB);
+                localStorage.setItem('cashBB', cashBB);
+                localStorage.setItem('cashChipPlayers', chipPlayers);
+            }, [cashMinBuyIn, cashMaxBuyIn, cashSB, cashBB, chipPlayers]);
+
+            useEffect(() => {
+                localStorage.setItem('pokerCashChipPresets', JSON.stringify(chipPresets));
+            }, [chipPresets]);
+
+            // The wheel steps through buy-in values between min and max, spaced by
+            // the smallest chip denomination (so every stop is an amount that's
+            // actually achievable with real chips).
+            const wheelStepDollars = (() => {
+                const positive = chipDenominations.map(c => c.value).filter(v => v > 0);
+                return positive.length ? Math.min(...positive) : 1;
+            })();
+            const buyInWheelValues = (() => {
+                const values = [];
+                const lo = Math.min(cashMinBuyIn, cashMaxBuyIn);
+                const hi = Math.max(cashMinBuyIn, cashMaxBuyIn);
+                if (!(hi > 0) || wheelStepDollars <= 0) return [lo];
+                for (let v = lo; v <= hi + wheelStepDollars / 2; v += wheelStepDollars) {
+                    values.push(Math.round(v * 100) / 100);
+                }
+                return values.length ? values : [lo];
+            })();
+
+            // Keep the wheel's selection inside range if min/max buy-in change.
+            useEffect(() => {
+                if (selectedBuyIn < cashMinBuyIn || selectedBuyIn > cashMaxBuyIn) {
+                    setSelectedBuyIn(cashMaxBuyIn);
+                }
+            }, [cashMinBuyIn, cashMaxBuyIn]);
+
+            const BUYIN_WHEEL_ITEM_HEIGHT = 40;
+
+            const handleBuyInWheelScroll = () => {
+                if (!buyInWheelRef.current) return;
+                const index = Math.round(buyInWheelRef.current.scrollTop / BUYIN_WHEEL_ITEM_HEIGHT);
+                const clamped = Math.max(0, Math.min(buyInWheelValues.length - 1, index));
+                const value = buyInWheelValues[clamped];
+                if (value !== undefined && value !== selectedBuyIn) {
+                    setSelectedBuyIn(value);
+                }
+            };
+
+            // Keep the wheel's scroll position in sync if the selected value
+            // changes from elsewhere (e.g. min/max buy-in change resets it).
+            useEffect(() => {
+                if (!buyInWheelRef.current) return;
+                const index = buyInWheelValues.findIndex(v => v === selectedBuyIn);
+                if (index >= 0) {
+                    buyInWheelRef.current.scrollTop = index * BUYIN_WHEEL_ITEM_HEIGHT;
+                }
+                // eslint-disable-next-line react-hooks/exhaustive-deps
+            }, [cashMinBuyIn, cashMaxBuyIn, wheelStepDollars]);
+
 const [show7DeuceGame, setShow7DeuceGame] = useState(false);
 const [showNitGame, setShowNitGame] = useState(false);
 const [showSquidGame, setShowSquidGame] = useState(false);
@@ -4923,14 +5135,14 @@ useEffect(() => { localStorage.setItem('showSquidGame', JSON.stringify(showSquid
             const addChipDenomination = () => {
                 setChipDenominations(prevChips => [
                     ...prevChips,
-                    { id: crypto.randomUUID(), color: '#CCCCCC', value: 0 } // Default new chip
+                    { id: crypto.randomUUID(), color: '#CCCCCC', value: 0, quantity: 0 } // Default new chip
                 ]);
             };
 
             const updateChipDenomination = (id, field, value) => {
                 setChipDenominations(prevChips =>
                     prevChips.map(chip =>
-                        chip.id === id ? { ...chip, [field]: (field === 'value' ? parseFloat(value) || 0 : value) } : chip
+                        chip.id === id ? { ...chip, [field]: (field === 'value' ? parseFloat(value) || 0 : field === 'quantity' ? parseInt(value) || 0 : value) } : chip
                     )
                 );
             };
@@ -4938,6 +5150,225 @@ useEffect(() => { localStorage.setItem('showSquidGame', JSON.stringify(showSquid
             const deleteChipDenomination = (id) => {
                 setChipDenominations(prevChips => prevChips.filter(chip => chip.id !== id));
             };
+
+            // --- Cash game chip distribution math -- works internally in integer
+            // cents to avoid floating-point rounding issues with money (e.g.
+            // 0.1 + 0.2 !== 0.3 in JS), converting back to dollars for display.
+            const toCents = (dollars) => Math.round((parseFloat(dollars) || 0) * 100);
+            const formatMoney = (cents) => `$${(cents / 100).toFixed(2)}`;
+
+            // Locks the 2 smallest denominations to a FIXED per-player count,
+            // computed once from the minimum buy-in -- so no matter which value
+            // is scrolled to on the wheel, those two chips never change. Only
+            // the larger denominations flex to make up the difference between
+            // buy-in amounts. This mirrors how a real cash game is actually run:
+            // everyone gets the same base pile of small chips for blinds/change,
+            // and buy-in size is expressed in bigger chips on top of that.
+            const computeLockedSmallChipBaseline = () => {
+                const chipsSorted = chipDenominations
+                    .map(c => ({ ...c, cents: toCents(c.value) }))
+                    .filter(c => c.cents > 0 && c.quantity > 0)
+                    .sort((a, b) => a.cents - b.cents);
+
+                if (!chipsSorted.length || !chipPlayers) return { counts: {}, valueCents: 0, lockedIds: [] };
+
+                const perPlayerCapByChip = chipsSorted.map(chip => Math.floor(chip.quantity / chipPlayers));
+                const lockedChips = chipsSorted.slice(0, Math.min(2, chipsSorted.length));
+                const lockedIds = lockedChips.map(c => c.id);
+
+                let remaining = toCents(cashMinBuyIn);
+                const counts = {};
+                let valueCents = 0;
+                lockedChips.forEach(chip => {
+                    const idx = chipsSorted.findIndex(c => c.id === chip.id);
+                    const cap = perPlayerCapByChip[idx];
+                    const idealCount = Math.floor(remaining / chip.cents);
+                    const give = Math.max(0, Math.min(idealCount, cap));
+                    counts[chip.id] = give;
+                    valueCents += give * chip.cents;
+                    remaining -= give * chip.cents;
+                });
+
+                return { counts, valueCents, lockedIds };
+            };
+
+            const tryDistributeCashForTarget = (targetCents, players, denominations, bias, lockedBaseline) => {
+                if (!targetCents || targetCents <= 0) return null;
+                if (!players || players <= 0) return null;
+                if (!denominations || denominations.length === 0) return null;
+
+                const chipsSorted = denominations
+                    .map(c => ({ ...c, cents: toCents(c.value) }))
+                    .filter(c => c.cents > 0 && c.quantity > 0)
+                    .sort((a, b) => a.cents - b.cents);
+
+                if (chipsSorted.length === 0) return null;
+
+                const perPlayerCapByChip = chipsSorted.map(chip => Math.floor(chip.quantity / players));
+                if (perPlayerCapByChip.every(cap => cap <= 0)) return null;
+
+                const n = chipsSorted.length;
+                const perPlayer = {};
+                chipsSorted.forEach(chip => { perPlayer[chip.id] = 0; });
+
+                // Start from the locked baseline (fixed regardless of target) and
+                // work with whatever value is left over. Locked chips get their
+                // capacity fully zeroed out afterward -- not just reduced -- so
+                // they truly can never receive more, even if there was leftover
+                // quantity that the later bias-driven passes would otherwise use.
+                const capRemainingByChip = [...perPlayerCapByChip];
+                (lockedBaseline?.lockedIds || []).forEach(id => {
+                    const idx = chipsSorted.findIndex(c => c.id === id);
+                    if (idx === -1) return;
+                    const count = lockedBaseline.counts[id] || 0;
+                    perPlayer[id] = count;
+                    capRemainingByChip[idx] = 0;
+                });
+                let remaining = targetCents - (lockedBaseline?.valueCents || 0);
+                if (remaining < 0) return null; // target somehow smaller than the locked baseline itself
+
+                if (bias === 'balanced') {
+                    const shareTarget = remaining / n;
+                    chipsSorted.forEach((chip, i) => {
+                        const cap = capRemainingByChip[i];
+                        if (cap <= 0) return;
+                        const idealCount = Math.floor(shareTarget / chip.cents);
+                        const give = Math.max(0, Math.min(idealCount, cap));
+                        perPlayer[chip.id] += give;
+                        remaining -= give * chip.cents;
+                        capRemainingByChip[i] -= give;
+                    });
+                    for (let i = 0; i < n && remaining > 0; i++) {
+                        const chip = chipsSorted[i];
+                        const cap = capRemainingByChip[i];
+                        if (cap <= 0) continue;
+                        const maxNeeded = Math.floor(remaining / chip.cents);
+                        const add = Math.min(cap, maxNeeded);
+                        if (add > 0) { perPlayer[chip.id] += add; remaining -= add * chip.cents; capRemainingByChip[i] -= add; }
+                    }
+                    for (let i = n - 1; i >= 0 && remaining > 0; i--) {
+                        const chip = chipsSorted[i];
+                        const cap = capRemainingByChip[i];
+                        if (cap <= 0) continue;
+                        const maxNeeded = Math.floor(remaining / chip.cents);
+                        const add = Math.min(cap, maxNeeded);
+                        if (add > 0) { perPlayer[chip.id] += add; remaining -= add * chip.cents; capRemainingByChip[i] -= add; }
+                    }
+                } else {
+                    const priorityOrder = bias === 'large'
+                        ? Array.from({ length: n }, (_, i) => n - 1 - i)
+                        : Array.from({ length: n }, (_, i) => i);
+
+                    for (const i of priorityOrder) {
+                        const chip = chipsSorted[i];
+                        const cap = capRemainingByChip[i];
+                        if (cap <= 0) continue;
+                        const idealCount = Math.floor(remaining / chip.cents);
+                        const give = Math.max(0, Math.min(idealCount, cap));
+                        perPlayer[chip.id] += give;
+                        remaining -= give * chip.cents;
+                        capRemainingByChip[i] -= give;
+                    }
+                    for (const i of [...priorityOrder].reverse()) {
+                        if (remaining <= 0) break;
+                        const chip = chipsSorted[i];
+                        const cap = capRemainingByChip[i];
+                        if (cap <= 0) continue;
+                        const maxNeeded = Math.floor(remaining / chip.cents);
+                        const add = Math.min(cap, maxNeeded);
+                        if (add > 0) { perPlayer[chip.id] += add; remaining -= add * chip.cents; capRemainingByChip[i] -= add; }
+                    }
+                }
+
+                if (remaining !== 0) return null; // require exact hit
+                return { perPlayer, chipsSorted };
+            };
+
+            const computeCashChipDistribution = () => {
+                const targetDollars = selectedBuyIn;
+                if (!targetDollars || targetDollars <= 0) return null;
+                if (!chipPlayers || chipPlayers <= 0) return null;
+                if (!chipDenominations || chipDenominations.length === 0) return null;
+
+                const lockedBaseline = computeLockedSmallChipBaseline();
+                const targetCents = toCents(targetDollars);
+                const positiveCents = chipDenominations.map(c => toCents(c.value)).filter(v => v > 0);
+                if (positiveCents.length === 0) return null;
+                const step = Math.min(...positiveCents);
+                const maxSpan = step * 400;
+
+                let bestResult = null;
+                let bestDiff = Infinity;
+
+                for (let delta = 0; Math.abs(delta) <= maxSpan; ) {
+                    const targetTry = targetCents + delta;
+                    if (targetTry > 0) {
+                        const result = tryDistributeCashForTarget(targetTry, chipPlayers, chipDenominations, chipBias, lockedBaseline);
+                        if (result) {
+                            const diff = Math.abs(targetTry - targetCents);
+                            if (diff < bestDiff) {
+                                bestDiff = diff;
+                                bestResult = { ...result, effectiveStackCents: targetTry, idealStackCents: targetCents, lockedIds: lockedBaseline.lockedIds };
+                                if (diff === 0) break;
+                            }
+                        }
+                    }
+                    if (delta >= 0) delta = -(delta + step); else delta = -delta;
+                }
+
+                return bestResult;
+            };
+
+            const cashChipDistribution = computeCashChipDistribution();
+            const cashIdealStackCents = cashChipDistribution?.idealStackCents ?? toCents(selectedBuyIn);
+            const cashEffectiveStackCents = cashChipDistribution?.effectiveStackCents ?? cashIdealStackCents;
+            const cashTotalValuePerPlayerCents = cashChipDistribution
+                ? cashChipDistribution.chipsSorted.reduce((sum, chip) => sum + (cashChipDistribution.perPlayer[chip.id] || 0) * chip.cents, 0)
+                : 0;
+            const getCashPerPlayerCountForChip = (chipId) => cashChipDistribution ? (cashChipDistribution.perPlayer[chipId] ?? 0) : null;
+            const isLockedChip = (chipId) => !!(cashChipDistribution?.lockedIds || []).includes(chipId);
+
+            // --- Chip Set Presets (save/load whole denomination sets) ---
+            const saveCurrentAsPreset = () => {
+                const name = newPresetName.trim();
+                if (!name) { alert('Enter a name for this chip set first.'); return; }
+                if (!chipDenominations.length) { alert('Add at least one chip denomination first.'); return; }
+                const preset = {
+                    id: Date.now().toString(),
+                    name,
+                    denominations: chipDenominations.map(c => ({ value: c.value, color: c.color, quantity: c.quantity || 0 }))
+                };
+                setChipPresets(prev => [...prev, preset]);
+                setNewPresetName('');
+            };
+
+            const loadChipPreset = (presetId) => {
+                const preset = chipPresets.find(p => p.id === presetId);
+                if (!preset) return;
+                if (chipDenominations.length > 0 && !confirm(`Load "${preset.name}"? This replaces your current chip set.`)) return;
+                setChipDenominations(preset.denominations.map(d => ({
+                    id: crypto.randomUUID(),
+                    value: d.value,
+                    color: d.color,
+                    quantity: d.quantity
+                })));
+            };
+
+            const renameChipPreset = (presetId) => {
+                const preset = chipPresets.find(p => p.id === presetId);
+                if (!preset) return;
+                const newName = prompt('Rename this chip set:', preset.name);
+                if (!newName || !newName.trim()) return;
+                setChipPresets(prev => prev.map(p => p.id === presetId ? { ...p, name: newName.trim() } : p));
+            };
+
+            const deleteChipPreset = (presetId) => {
+                const preset = chipPresets.find(p => p.id === presetId);
+                if (!preset) return;
+                if (!confirm(`Delete the "${preset.name}" chip set preset? This can't be undone.`)) return;
+                setChipPresets(prev => prev.filter(p => p.id !== presetId));
+            };
+
 			
 			const handleHighHandBackToMain = () => {
 			  // Option A: if high hand is its own view
@@ -5531,16 +5962,10 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
 
 
 {/* Chip Denominations - existing code continues */}
-{highHandSettingsSubView === 'chipSettings' && (
-    <>
-        {/* your existing chip settings content */}
-    </>
-)}
-
                                 {/* Chip Denominations Settings View */}
                                 {highHandSettingsSubView === 'chipSettings' && (
                                     <>
-                                        <div className="flex flex-col space-y-4 mb-6">
+                                        <div className="flex flex-col space-y-6 mb-6">
                                             <div className="flex items-center justify-between">
                                                 <span className={`${subtextColorClass} text-base`}>Show Chip Display:</span>
                                                 <label htmlFor="toggle-chip-display" className="flex items-center cursor-pointer">
@@ -5559,23 +5984,188 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                                 </label>
                                             </div>
 
-                                            <div className="space-y-4">
+                                            {/* Chip Set Presets -- save/load whole denomination sets, since
+                                                different tournament nights may use physically different chips */}
+                                            <div className={`${sectionBgClass} rounded-lg p-3`}>
+                                                <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5 block`}>Chip Set Presets</label>
+                                                <select
+                                                    value=""
+                                                    onChange={(e) => { if (e.target.value) loadChipPreset(e.target.value); }}
+                                                    className={`w-full px-3 py-2 rounded-md ${inputBgClass} ${inputBorderClass} border ${subtextColorClass} mb-2`}
+                                                >
+                                                    <option value="">Load a saved chip set…</option>
+                                                    {chipPresets.map(p => (
+                                                        <option key={p.id} value={p.id}>{p.name} ({p.denominations.length} chips)</option>
+                                                    ))}
+                                                </select>
+                                                <div className="flex gap-2">
+                                                    <input
+                                                        type="text"
+                                                        placeholder="Name this chip set…"
+                                                        value={newPresetName}
+                                                        onChange={(e) => setNewPresetName(e.target.value)}
+                                                        className={`flex-grow px-3 py-2 rounded-md ${inputBgClass} ${inputBorderClass} border ${subtextColorClass}`}
+                                                    />
+                                                    <button onClick={saveCurrentAsPreset} className="px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold whitespace-nowrap">
+                                                        Save Current
+                                                    </button>
+                                                </div>
+                                                {chipPresets.length > 0 && (
+                                                    <div className="mt-3 space-y-1.5">
+                                                        {chipPresets.map(p => (
+                                                            <div key={p.id} className={`flex items-center justify-between text-xs ${subtextColorClass} ${inputBgClass} rounded-md px-3 py-2`}>
+                                                                <span className="truncate">{p.name}</span>
+                                                                <div className="flex gap-3 shrink-0 ml-2">
+                                                                    <button onClick={() => renameChipPreset(p.id)} className="text-blue-400 underline">Rename</button>
+                                                                    <button onClick={() => deleteChipPreset(p.id)} className="text-red-400 underline">Delete</button>
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            {/* Table stakes + buy-in range -- there's no blind structure to
+                                                reference in Cash mode, so this drives the math instead */}
+                                            <div className="rounded-xl border border-yellow-400/50 bg-yellow-500/5 p-4">
+                                                <p className="text-xs font-bold text-yellow-300 uppercase tracking-wide mb-3">
+                                                    Enter your table stakes, buy-in range, and how many of each chip you own
+                                                </p>
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                                                    <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center`}>
+                                                        <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5`}>Small Blind</label>
+                                                        <input
+                                                            type="text"
+                                                            inputMode="decimal"
+                                                            value={cashSB}
+                                                            onChange={(e) => setCashSB(parseFloat(e.target.value) || 0)}
+                                                            className="w-full px-3 py-2 rounded-md bg-gray-900/80 border border-yellow-400/70 text-yellow-200 font-semibold text-lg focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                                                        />
+                                                    </div>
+                                                    <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center`}>
+                                                        <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5`}>Big Blind</label>
+                                                        <input
+                                                            type="text"
+                                                            inputMode="decimal"
+                                                            value={cashBB}
+                                                            onChange={(e) => setCashBB(parseFloat(e.target.value) || 0)}
+                                                            className="w-full px-3 py-2 rounded-md bg-gray-900/80 border border-yellow-400/70 text-yellow-200 font-semibold text-lg focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                                                        />
+                                                        <span className="text-[11px] text-gray-400 mt-1">Can match Small Blind (e.g. .50/.50)</span>
+                                                    </div>
+                                                </div>
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                                                    <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center`}>
+                                                        <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5`}>Min Buy-In</label>
+                                                        <input
+                                                            type="text"
+                                                            inputMode="decimal"
+                                                            value={cashMinBuyIn}
+                                                            onChange={(e) => setCashMinBuyIn(parseFloat(e.target.value) || 0)}
+                                                            className="w-full px-3 py-2 rounded-md bg-gray-900/80 border border-yellow-400/70 text-yellow-200 font-semibold text-lg focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                                                        />
+                                                    </div>
+                                                    <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center`}>
+                                                        <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5`}>Max Buy-In</label>
+                                                        <input
+                                                            type="text"
+                                                            inputMode="decimal"
+                                                            value={cashMaxBuyIn}
+                                                            onChange={(e) => setCashMaxBuyIn(parseFloat(e.target.value) || 0)}
+                                                            className="w-full px-3 py-2 rounded-md bg-gray-900/80 border border-yellow-400/70 text-yellow-200 font-semibold text-lg focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                                                        />
+                                                    </div>
+                                                </div>
+
+                                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                                    <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center`}>
+                                                        <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5`}>Number of Players</label>
+                                                        <input
+                                                            type="number"
+                                                            min="1"
+                                                            value={chipPlayers}
+                                                            onChange={(e) => setChipPlayers(Math.max(1, parseInt(e.target.value) || 1))}
+                                                            className="w-full px-3 py-2 rounded-md bg-gray-900/80 border border-yellow-400/70 text-yellow-200 font-semibold text-lg focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                                                        />
+                                                    </div>
+                                                    <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col items-center`}>
+                                                        <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5 self-start`}>Buy-In (scroll to pick)</label>
+                                                        <div className="relative w-full" style={{ height: `${BUYIN_WHEEL_ITEM_HEIGHT * 3}px` }}>
+                                                            <div
+                                                                className="absolute inset-x-0 pointer-events-none border-y-2 border-yellow-400/70 z-10"
+                                                                style={{ top: `${BUYIN_WHEEL_ITEM_HEIGHT}px`, height: `${BUYIN_WHEEL_ITEM_HEIGHT}px` }}
+                                                            ></div>
+                                                            <div
+                                                                ref={buyInWheelRef}
+                                                                onScroll={handleBuyInWheelScroll}
+                                                                className="h-full overflow-y-scroll"
+                                                                style={{ scrollSnapType: 'y mandatory' }}
+                                                            >
+                                                                <div style={{ height: `${BUYIN_WHEEL_ITEM_HEIGHT}px` }}></div>
+                                                                {buyInWheelValues.map(v => (
+                                                                    <div
+                                                                        key={v}
+                                                                        className={`flex items-center justify-center font-bold transition-all ${v === selectedBuyIn ? 'text-yellow-300 text-xl' : 'text-gray-500 text-sm'}`}
+                                                                        style={{ height: `${BUYIN_WHEEL_ITEM_HEIGHT}px`, scrollSnapAlign: 'center' }}
+                                                                    >
+                                                                        {formatMoney(toCents(v))}
+                                                                    </div>
+                                                                ))}
+                                                                <div style={{ height: `${BUYIN_WHEEL_ITEM_HEIGHT}px` }}></div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center`}>
+                                                        <span className={`text-xs font-semibold ${subtextColorClass} mb-1.5`}>Achievable With Your Chips</span>
+                                                        {cashChipDistribution ? (
+                                                            <span className={`text-lg font-bold ${cashTotalValuePerPlayerCents === cashIdealStackCents ? 'text-green-400' : 'text-yellow-300'}`}>
+                                                                {formatMoney(cashEffectiveStackCents)}
+                                                                {cashTotalValuePerPlayerCents !== cashIdealStackCents && <span className="text-xs font-normal ml-1">(closest)</span>}
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-lg font-bold text-gray-500">—</span>
+                                                        )}
+                                                    </div>
+                                                </div>
+
+                                                <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center mt-3`}>
+                                                    <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5`}>Chip Distribution Style</label>
+                                                    <select
+                                                        value={chipBias}
+                                                        onChange={(e) => setChipBias(e.target.value)}
+                                                        className="w-full px-3 py-2 rounded-md bg-gray-900/80 border border-yellow-400/70 text-yellow-200 font-semibold focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                                                    >
+                                                        <option value="small">More small chips (fuller-looking stack)</option>
+                                                        <option value="balanced">Balanced mix</option>
+                                                        <option value="large">Fewer, bigger chips (tidier stack)</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+
+                                            {/* Chip inventory, one clean card per denomination */}
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                                 {chipDenominations.sort((a, b) => a.value - b.value).map(chip => (
-                                                    <div key={chip.id} className={`${sectionBgClass} p-3 rounded-lg shadow-sm flex items-center gap-4`}>
-                                                        <svg viewBox="0 0 40 40" className="w-9 h-9 shrink-0" style={{ filter: 'drop-shadow(0 2px 3px rgba(0,0,0,0.4))' }}>
-                                            <circle cx="20" cy="20" r="18" fill={chip.color} stroke="#ffffff" strokeWidth="2" />
-                                            <circle cx="20" cy="20" r="18" fill="none" stroke="#000000" strokeOpacity="0.15" strokeWidth="1" />
-                                            <circle cx="20" cy="20" r="13.5" fill="none" stroke="#ffffff" strokeWidth="2.5" strokeDasharray="4.2 4.2" />
-                                            <circle cx="20" cy="20" r="8" fill="#ffffff" fillOpacity="0.92" />
-                                            <circle cx="20" cy="20" r="8" fill="none" stroke={chip.color} strokeWidth="1.5" />
-                                        </svg>
-                                                        <div className="flex items-center gap-2 flex-grow">
-                                                            <label className={`${subtextColorClass} text-sm whitespace-nowrap`}>Color:</label>
-                                                            {/* Replaced text input with select dropdown for colors */}
+                                                    <div key={chip.id} className={`${sectionBgClass} rounded-xl p-4 shadow-sm relative`}>
+                                                        <button
+                                                            onClick={() => deleteChipDenomination(chip.id)}
+                                                            className="absolute top-3 right-3 w-7 h-7 flex items-center justify-center rounded-full bg-red-600/90 hover:bg-red-600 text-white text-sm font-bold"
+                                                            aria-label="Remove chip"
+                                                        >
+                                                            ✕
+                                                        </button>
+
+                                                        <div className="flex items-center gap-3 mb-3 pr-8">
+                                                            <svg viewBox="0 0 40 40" className="w-10 h-10 shrink-0" style={{ filter: 'drop-shadow(0 2px 3px rgba(0,0,0,0.4))' }}>
+                                                                <circle cx="20" cy="20" r="18" fill={chip.color} stroke="#ffffff" strokeWidth="2" />
+                                                                <circle cx="20" cy="20" r="18" fill="none" stroke="#000000" strokeOpacity="0.15" strokeWidth="1" />
+                                                                <circle cx="20" cy="20" r="13.5" fill="none" stroke="#ffffff" strokeWidth="2.5" strokeDasharray="4.2 4.2" />
+                                                                <circle cx="20" cy="20" r="8" fill="#ffffff" fillOpacity="0.92" />
+                                                                <circle cx="20" cy="20" r="8" fill="none" stroke={chip.color} strokeWidth="1.5" />
+                                                            </svg>
                                                             <select
                                                                 value={chip.color}
                                                                 onChange={(e) => updateChipDenomination(chip.id, 'color', e.target.value)}
-                                                                className={`w-28 px-2 py-1 rounded-md ${inputBgClass} ${inputBorderClass} ${subtextColorClass}`}
+                                                                className={`flex-grow px-2 py-2 rounded-md ${inputBgClass} ${inputBorderClass} border ${subtextColorClass} text-sm`}
                                                             >
                                                                 {predefinedColors.map(color => (
                                                                     <option key={color.hex} value={color.hex} style={{ backgroundColor: color.hex, color: (color.name === 'Black' || color.name === 'Maroon' || color.name === 'Indigo') ? 'white' : 'black' }}>
@@ -5584,31 +6174,52 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                                                 ))}
                                                             </select>
                                                         </div>
-                                                        <div className="flex items-center gap-2">
-                                                            <label className={`${subtextColorClass} text-sm whitespace-nowrap`}>Value:</label>
-                                                            <input
-                                                                type="text" // Changed to type="text" to allow decimals more easily
-                                                                value={chip.value}
-                                                                onChange={(e) => updateChipDenomination(chip.id, 'value', e.target.value)}
-                                                                min="0.01" step="any" // Min set to 0.01, step to any for decimals
-                                                                className={`w-24 px-2 py-1 rounded-md ${inputBgClass} ${inputBorderClass} ${subtextColorClass}`}
-                                                                inputMode="decimal" // Suggests decimal keyboard on mobile
-                                                            />
+
+                                                        <div className="grid grid-cols-2 gap-3">
+                                                            <div>
+                                                                <label className={`text-xs font-semibold ${subtextColorClass} block mb-1`}>Value ($)</label>
+                                                                <input
+                                                                    type="text"
+                                                                    inputMode="decimal"
+                                                                    value={chip.value}
+                                                                    onChange={(e) => updateChipDenomination(chip.id, 'value', e.target.value)}
+                                                                    placeholder="0.25"
+                                                                    className={`w-full px-3 py-2 rounded-md ${inputBgClass} ${inputBorderClass} border ${subtextColorClass}`}
+                                                                />
+                                                            </div>
+                                                            <div>
+                                                                <label className={`text-xs font-semibold ${subtextColorClass} block mb-1`}>Quantity Owned</label>
+                                                                <input
+                                                                    type="number"
+                                                                    min="0"
+                                                                    value={chip.quantity ?? 0}
+                                                                    onChange={(e) => updateChipDenomination(chip.id, 'quantity', e.target.value)}
+                                                                    className={`w-full px-3 py-2 rounded-md ${inputBgClass} ${inputBorderClass} border ${subtextColorClass}`}
+                                                                />
+                                                            </div>
                                                         </div>
-                                                        <button
-                                                            onClick={() => deleteChipDenomination(chip.id)}
-                                                            className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
-                                                        >
-                                                            Remove
-                                                        </button>
+
+                                                        {cashChipDistribution && (
+                                                            <div className="mt-3 flex items-center justify-center gap-2">
+                                                                <span className="inline-flex items-center justify-center px-3 py-1 rounded-full bg-blue-600/20 border border-blue-500/40 text-xs font-semibold text-blue-300">
+                                                                    {getCashPerPlayerCountForChip(chip.id)} per player
+                                                                </span>
+                                                                {isLockedChip(chip.id) && (
+                                                                    <span className="inline-flex items-center justify-center px-2 py-1 rounded-full bg-yellow-500/20 border border-yellow-400/40 text-[10px] font-bold text-yellow-300" title="Fixed at this count across the whole buy-in range">
+                                                                        🔒 Locked
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 ))}
                                             </div>
+
                                             <button
                                                 onClick={addChipDenomination}
-                                                className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200 mt-4"
+                                                className="w-full py-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold shadow-md transition-all duration-200"
                                             >
-                                                Add New Chip
+                                                + Add New Chip
                                             </button>
                                         </div>
                                         <div className="flex justify-between mt-8">
