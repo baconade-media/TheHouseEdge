@@ -69,10 +69,11 @@
     <!-- Babel for JSX transpilation in the browser -->
     <script crossorigin src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-    <!-- Firebase (Authentication + Firestore for login / cross-device sync) -->
+    <!-- Firebase (Authentication + Firestore for login / cross-device sync + Storage for hosted files) -->
     <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-storage-compat.js"></script>
     <script>
       const firebaseConfig = {
         apiKey: "AIzaSyD377ROit6RCFMX9sEFey2adhHRbEDwelc",
@@ -86,6 +87,7 @@
       firebase.initializeApp(firebaseConfig);
       window.__firebaseAuth = firebase.auth();
       window.__firebaseDb = firebase.firestore();
+      window.__firebaseStorage = firebase.storage();
 
       // --- Cloud sync helpers (operate directly on localStorage) ---
       window.__currentUser = null;
@@ -189,6 +191,11 @@
             const [error, setError] = useState('');
             const [busy, setBusy] = useState(false);
             const [info, setInfo] = useState('');
+            const [showPrivacyPolicy, setShowPrivacyPolicy] = useState(false);
+            const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+            const [deletePassword, setDeletePassword] = useState('');
+            const [deleteError, setDeleteError] = useState('');
+            const [deleteBusy, setDeleteBusy] = useState(false);
 
             const isDark = theme === 'dark';
             const panelBg = isDark ? 'bg-gray-800 text-white' : 'bg-white text-gray-900';
@@ -232,6 +239,43 @@
                 setOpen(false);
             };
 
+            // Permanently deletes the account and everything tied to it: the
+            // Firestore document (settings, contacts, invites, roster sync data),
+            // any hosted calendar files in Storage, the Auth account itself, and
+            // this device's local copy of everything. Requires re-entering the
+            // password first, both as a safety confirmation and because Firebase
+            // requires a "recent" login before allowing account deletion.
+            const handleDeleteAccount = async () => {
+                if (!deletePassword) { setDeleteError('Enter your password to confirm.'); return; }
+                setDeleteError('');
+                setDeleteBusy(true);
+                try {
+                    const credential = firebase.auth.EmailAuthProvider.credential(user.email, deletePassword);
+                    await user.reauthenticateWithCredential(credential);
+
+                    const uid = user.uid;
+
+                    try { await window.__firebaseDb.collection('userSettings').doc(uid).delete(); }
+                    catch (e) { console.error('Could not delete Firestore data:', e); }
+
+                    try {
+                        const listRef = window.__firebaseStorage.ref(`icsFiles/${uid}`);
+                        const list = await listRef.listAll();
+                        await Promise.all(list.items.map(item => item.delete()));
+                    } catch (e) { console.error('Could not delete stored calendar files:', e); }
+
+                    await user.delete();
+
+                    localStorage.clear();
+                    setOpen(false);
+                    window.location.reload();
+                } catch (err) {
+                    setDeleteError(err.message.replace('Firebase: ', ''));
+                } finally {
+                    setDeleteBusy(false);
+                }
+            };
+
             return (
                 <>
                     {!hidden && (
@@ -261,10 +305,45 @@
                                     <>
                                         <h2 className="text-lg font-bold mb-2">Account</h2>
                                         <p className="text-sm mb-4 opacity-80">Signed in as {user.email}</p>
-                                        <p className="text-xs mb-4 opacity-60">Your settings sync automatically to your account and follow you to any device you log into.</p>
+                                        <p className="text-xs mb-4 opacity-60">Your settings sync automatically to your account and follow you to any device you log into. All of it is encrypted in transit and at rest, and only visible to you.</p>
                                         <button onClick={handleLogout} className="w-full py-2 rounded-md bg-red-600 text-white font-medium mb-2">
                                             Log Out
                                         </button>
+                                        <button onClick={() => setShowPrivacyPolicy(true)} className="w-full text-xs underline opacity-70 mb-3">
+                                            Privacy Policy
+                                        </button>
+
+                                        {!showDeleteConfirm ? (
+                                            <button onClick={() => setShowDeleteConfirm(true)} className="w-full py-2 rounded-md border border-red-600 text-red-500 text-sm font-medium mb-2">
+                                                Delete My Account &amp; Data
+                                            </button>
+                                        ) : (
+                                            <div className="mb-2 p-3 rounded-md border border-red-600/50 bg-red-500/5">
+                                                <p className="text-xs text-red-400 mb-2 font-semibold">
+                                                    This permanently deletes your account, contacts, invites, roster sync, and any hosted calendar files. This cannot be undone.
+                                                </p>
+                                                <input
+                                                    type="password"
+                                                    placeholder="Confirm your password"
+                                                    value={deletePassword}
+                                                    onChange={(e) => setDeletePassword(e.target.value)}
+                                                    className={inputCls}
+                                                />
+                                                {deleteError && <p className="text-red-500 text-xs mb-2">{deleteError}</p>}
+                                                <div className="flex gap-2">
+                                                    <button onClick={handleDeleteAccount} disabled={deleteBusy} className="flex-1 py-2 rounded-md bg-red-600 text-white text-sm font-semibold disabled:opacity-50">
+                                                        {deleteBusy ? 'Deleting…' : 'Permanently Delete'}
+                                                    </button>
+                                                    <button
+                                                        onClick={() => { setShowDeleteConfirm(false); setDeletePassword(''); setDeleteError(''); }}
+                                                        className="flex-1 py-2 rounded-md border text-sm"
+                                                    >
+                                                        Cancel
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+
                                         <button onClick={() => setOpen(false)} className="w-full py-2 rounded-md border">
                                             Close
                                         </button>
@@ -316,8 +395,30 @@
                                         <button onClick={() => { setOpen(false); resetFormState(); }} className="w-full py-2 rounded-md border mt-1">
                                             Continue without an account
                                         </button>
+                                        <button onClick={() => setShowPrivacyPolicy(true)} className="w-full text-xs underline opacity-70 mt-3">
+                                            Privacy Policy
+                                        </button>
                                     </>
                                 )}
+                            </div>
+                        </div>
+                    )}
+
+                    {showPrivacyPolicy && (
+                        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
+                            <div className={`w-full max-w-md max-h-[80vh] overflow-y-auto rounded-xl shadow-2xl p-6 ${panelBg}`}>
+                                <h2 className="text-lg font-bold mb-3">Privacy Policy</h2>
+                                <div className="text-xs space-y-3 opacity-90 leading-relaxed">
+                                    <p><strong>What we store.</strong> If you create an account, we store your email (for login), any Contacts you add (name, phone, email — all optional and entered by you), your Logbook roster and session history, Tournament/High Hand settings, and Invites events. Nothing is collected about you beyond what you or your poker group choose to enter.</p>
+                                    <p><strong>Where it lives.</strong> Everything is stored on Google's Firebase platform, encrypted both in transit (while it travels between your device and the server) and at rest (while stored on their servers) — the same standard used by most banking and email apps.</p>
+                                    <p><strong>Who can see it.</strong> Only you, while logged into your own account. We don't have a way to browse other users' data, and nobody else's account can read yours.</p>
+                                    <p><strong>Calendar links.</strong> The "Add to Calendar" feature creates a file with a long, random, unguessable link (similar to a "share" link on Google Docs) — it's not searchable or listed publicly anywhere, and only contains that one event's details, never your contact list.</p>
+                                    <p><strong>What we don't do.</strong> We don't sell data, share it with advertisers, or use it for anything beyond running the app's features for you.</p>
+                                    <p><strong>Your control.</strong> You can permanently delete your account and all associated data at any time from the Account screen — this is irreversible and removes everything immediately.</p>
+                                </div>
+                                <button onClick={() => setShowPrivacyPolicy(false)} className="w-full py-2 rounded-md border mt-4">
+                                    Close
+                                </button>
                             </div>
                         </div>
                     )}
@@ -567,6 +668,8 @@
             const [currentEventId, setCurrentEventId] = useState(() => localStorage.getItem('pokerAppInvitesCurrentEvent') || null);
             const [newEventTitle, setNewEventTitle] = useState('');
             const [newEventDate, setNewEventDate] = useState('');
+            const [newEventStartTime, setNewEventStartTime] = useState('');
+            const [newEventEndTime, setNewEventEndTime] = useState('');
             const [editingMessage, setEditingMessage] = useState(false);
             const [messageDraft, setMessageDraft] = useState('');
 
@@ -651,20 +754,39 @@
 
             const currentEvent = events.find(e => e.id === currentEventId);
 
-            const defaultMessage = (title, date) => `Hey! You're invited to ${title}${date ? ' on ' + date : ''}. Let me know if you can make it!`;
+            const formatTimeDisplay = (time24) => {
+                if (!time24) return '';
+                const [h, m] = time24.split(':').map(Number);
+                const period = h >= 12 ? 'PM' : 'AM';
+                const h12 = h % 12 === 0 ? 12 : h % 12;
+                return `${h12}:${String(m).padStart(2, '0')} ${period}`;
+            };
+
+            const defaultMessage = (title, date, startTime, endTime) => {
+                let when = date ? ' on ' + date : '';
+                if (startTime) {
+                    when += ` at ${formatTimeDisplay(startTime)}`;
+                    if (endTime) when += ` - ${formatTimeDisplay(endTime)}`;
+                }
+                return `Hey! You're invited to ${title}${when}. Let me know if you can make it!`;
+            };
 
             // --- Event management ---
             const createEvent = () => {
                 if (!newEventTitle.trim()) return;
                 const id = Date.now().toString();
                 const event = {
-                    id, title: newEventTitle.trim(), date: newEventDate || '', invitees: [],
-                    message: defaultMessage(newEventTitle.trim(), newEventDate)
+                    id, title: newEventTitle.trim(), date: newEventDate || '',
+                    startTime: newEventStartTime || '', endTime: newEventEndTime || '',
+                    invitees: [],
+                    message: defaultMessage(newEventTitle.trim(), newEventDate, newEventStartTime, newEventEndTime)
                 };
                 setEvents(prev => [event, ...prev]);
                 setCurrentEventId(id);
                 setNewEventTitle('');
                 setNewEventDate('');
+                setNewEventStartTime('');
+                setNewEventEndTime('');
             };
 
             const deleteEvent = (id) => {
@@ -962,7 +1084,7 @@
             };
 
             const startEditingMessage = () => {
-                setMessageDraft(currentEvent.message || defaultMessage(currentEvent.title, currentEvent.date));
+                setMessageDraft(currentEvent.message || defaultMessage(currentEvent.title, currentEvent.date, currentEvent.startTime, currentEvent.endTime));
                 setEditingMessage(true);
             };
 
@@ -971,23 +1093,138 @@
                 setEditingMessage(false);
             };
 
-            const getMessage = (event) => event.message || defaultMessage(event.title, event.date);
+            const getMessage = (event) => event.message || defaultMessage(event.title, event.date, event.startTime, event.endTime);
 
-            const smsLink = (invitee, event) => `sms:${invitee.phone}?body=${encodeURIComponent(getMessage(event))}`;
-            const emailLink = (invitee, event) => `mailto:${invitee.email}?subject=${encodeURIComponent(event.title + ' - Invite')}&body=${encodeURIComponent(getMessage(event))}`;
+            // Builds a standard .ics (iCalendar) file for the event -- this is an
+            // open format every calendar app understands (Apple, Google, Outlook,
+            // etc.), so tapping it hands off to whatever's set as the default
+            // calendar app rather than us needing to integrate with any one of
+            // them specifically. Currently creates an all-day event, since Invites
+            // only collects a date, not a specific time.
+            const escapeICSText = (s) => (s || '')
+                .replace(/\\/g, '\\\\')
+                .replace(/;/g, '\\;')
+                .replace(/,/g, '\\,')
+                .replace(/\n/g, '\\n');
+
+            const formatEventDateTime = (event) => {
+                if (!event.date) return 'No date set';
+                let result = event.date;
+                if (event.startTime) {
+                    result += ` at ${formatTimeDisplay(event.startTime)}`;
+                    if (event.endTime) result += ` - ${formatTimeDisplay(event.endTime)}`;
+                }
+                return result;
+            };
+
+            const buildICS = (event) => {
+                if (!event.date) return null;
+                const stamp = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+                const dateCompact = event.date.replace(/-/g, '');
+                let dtStartLine, dtEndLine;
+
+                if (event.startTime) {
+                    // A "floating" local time (no Z, no TZID) -- calendar apps treat
+                    // this as the device's own local time, which is the right
+                    // behavior here since there's no timezone info collected.
+                    const startCompact = event.startTime.replace(':', '') + '00';
+                    dtStartLine = `DTSTART:${dateCompact}T${startCompact}`;
+
+                    let endCompact;
+                    if (event.endTime) {
+                        endCompact = event.endTime.replace(':', '') + '00';
+                    } else {
+                        // No end time given -- default to a 4-hour block, typical for a poker night.
+                        const [h, m] = event.startTime.split(':').map(Number);
+                        const endDate = new Date(2000, 0, 1, h, m);
+                        endDate.setHours(endDate.getHours() + 4);
+                        endCompact = `${String(endDate.getHours()).padStart(2, '0')}${String(endDate.getMinutes()).padStart(2, '0')}00`;
+                    }
+                    dtEndLine = `DTEND:${dateCompact}T${endCompact}`;
+                } else {
+                    // No time given at all -- fall back to an all-day event.
+                    const endDateObj = new Date(event.date + 'T00:00:00');
+                    endDateObj.setDate(endDateObj.getDate() + 1); // DTEND is exclusive for all-day events
+                    const endDateCompact = endDateObj.toISOString().slice(0, 10).replace(/-/g, '');
+                    dtStartLine = `DTSTART;VALUE=DATE:${dateCompact}`;
+                    dtEndLine = `DTEND;VALUE=DATE:${endDateCompact}`;
+                }
+
+                const lines = [
+                    'BEGIN:VCALENDAR',
+                    'VERSION:2.0',
+                    'PRODID:-//The House Edge//Invites//EN',
+                    'CALSCALE:GREGORIAN',
+                    'BEGIN:VEVENT',
+                    `UID:${event.id}@thehouseedge.net`,
+                    `DTSTAMP:${stamp}`,
+                    dtStartLine,
+                    dtEndLine,
+                    `SUMMARY:${escapeICSText(event.title)}`,
+                    `DESCRIPTION:${escapeICSText(getMessage(event))}`,
+                    'END:VEVENT',
+                    'END:VCALENDAR'
+                ];
+                return lines.join('\r\n');
+            };
+
+            const calendarFileLink = (event) => {
+                const ics = buildICS(event);
+                if (!ics) return null;
+                return `data:text/calendar;charset=utf-8,${encodeURIComponent(ics)}`;
+            };
+
+            // Uploads the event's .ics file to Firebase Storage so invitees (who
+            // aren't logged in and can't run any app code) can just tap a plain
+            // link in their text/email to add it to their own calendar, the same
+            // way the host's own "Add to Calendar" button works locally.
+            const uploadICSForEvent = async (event) => {
+                if (!window.__currentUser) return; // requires being logged in (Pro feature)
+                const ics = buildICS(event);
+                if (!ics) return;
+                try {
+                    const path = `icsFiles/${window.__currentUser.uid}/${event.id}.ics`;
+                    const ref = window.__firebaseStorage.ref(path);
+                    await ref.putString(ics, 'raw', { contentType: 'text/calendar' });
+                    const url = await ref.getDownloadURL();
+                    setEvents(prev => prev.map(e => e.id === event.id ? { ...e, icsUrl: url } : e));
+                } catch (err) {
+                    console.error('Could not upload calendar file:', err);
+                }
+            };
+
+            // Re-uploads whenever anything that affects the calendar file changes,
+            // so the hosted link always reflects the latest details -- keyed on the
+            // plain values (not the whole event object) so updating icsUrl itself
+            // doesn't cause this to loop.
+            useEffect(() => {
+                if (!currentEvent) return;
+                uploadICSForEvent(currentEvent);
+            }, [currentEvent?.id, currentEvent?.title, currentEvent?.date, currentEvent?.startTime, currentEvent?.endTime]);
+
+            // The editable message (shown/edited in the UI) never includes the
+            // calendar link directly -- it's appended automatically only when
+            // actually sending, so editing your message doesn't require retyping it.
+            const getOutgoingMessage = (event) => {
+                const base = getMessage(event);
+                return event.icsUrl ? `${base}\n\nAdd to calendar: ${event.icsUrl}` : base;
+            };
+
+            const smsLink = (invitee, event) => `sms:${invitee.phone}?body=${encodeURIComponent(getOutgoingMessage(event))}`;
+            const emailLink = (invitee, event) => `mailto:${invitee.email}?subject=${encodeURIComponent(event.title + ' - Invite')}&body=${encodeURIComponent(getOutgoingMessage(event))}`;
 
             const textAllPending = () => {
                 if (!currentEvent) return;
                 const numbers = currentEvent.invitees.filter(i => i.status === 'pending' && i.phone).map(i => i.phone);
                 if (!numbers.length) return;
-                window.location.href = `sms:${numbers.join(',')}?body=${encodeURIComponent(getMessage(currentEvent))}`;
+                window.location.href = `sms:${numbers.join(',')}?body=${encodeURIComponent(getOutgoingMessage(currentEvent))}`;
             };
 
             const emailAllPending = () => {
                 if (!currentEvent) return;
                 const emails = currentEvent.invitees.filter(i => i.status === 'pending' && i.email).map(i => i.email);
                 if (!emails.length) return;
-                window.location.href = `mailto:${emails.join(',')}?subject=${encodeURIComponent(currentEvent.title + ' - Invite')}&body=${encodeURIComponent(getMessage(currentEvent))}`;
+                window.location.href = `mailto:${emails.join(',')}?subject=${encodeURIComponent(currentEvent.title + ' - Invite')}&body=${encodeURIComponent(getOutgoingMessage(currentEvent))}`;
             };
 
             // A browser can only ever trigger one sms: link per tap, so there's no
@@ -1082,8 +1319,28 @@
                                             type="date"
                                             value={newEventDate}
                                             onChange={(e) => setNewEventDate(e.target.value)}
-                                            className={`bg-slate-900 border-slate-700 border rounded-lg px-3 py-3 w-full mb-3 text-base text-slate-100`}
+                                            className={`bg-slate-900 border-slate-700 border rounded-lg px-3 py-3 w-full mb-2 text-base text-slate-100`}
                                         />
+                                        <div className="flex gap-2 mb-3">
+                                            <div className="flex-1">
+                                                <label className="text-xs text-slate-500 block mb-1">Start time (optional)</label>
+                                                <input
+                                                    type="time"
+                                                    value={newEventStartTime}
+                                                    onChange={(e) => setNewEventStartTime(e.target.value)}
+                                                    className={`bg-slate-900 border-slate-700 border rounded-lg px-3 py-3 w-full text-base text-slate-100`}
+                                                />
+                                            </div>
+                                            <div className="flex-1">
+                                                <label className="text-xs text-slate-500 block mb-1">End time (optional)</label>
+                                                <input
+                                                    type="time"
+                                                    value={newEventEndTime}
+                                                    onChange={(e) => setNewEventEndTime(e.target.value)}
+                                                    className={`bg-slate-900 border-slate-700 border rounded-lg px-3 py-3 w-full text-base text-slate-100`}
+                                                />
+                                            </div>
+                                        </div>
                                         <button onClick={createEvent} className="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold">
                                             Create Event
                                         </button>
@@ -1096,7 +1353,7 @@
                                             <div key={event.id} className={`bg-slate-900/60 rounded-lg p-3 flex items-center justify-between`}>
                                                 <button onClick={() => setCurrentEventId(event.id)} className="text-left flex-grow min-w-0">
                                                     <div className={`font-semibold truncate text-slate-100`}>{event.title}</div>
-                                                    <div className={`text-xs truncate text-slate-500`}>{event.date || 'No date set'} &middot; {event.invitees.length} invited</div>
+                                                    <div className={`text-xs truncate text-slate-500`}>{formatEventDateTime(event)} &middot; {event.invitees.length} invited</div>
                                                 </button>
                                                 <button onClick={() => deleteEvent(event.id)} className="text-red-500 text-sm font-semibold px-3 py-2 -m-1 shrink-0">Delete</button>
                                             </div>
@@ -1183,6 +1440,7 @@
                                         <h3 className={`text-sm font-bold text-slate-100`}>Your Contacts</h3>
                                         <span className={`text-xs text-slate-500`}>{contacts.length} total</span>
                                     </div>
+                                    <p className="text-[11px] text-slate-500 mb-3">🔒 All contact info is encrypted and only visible to you.</p>
                                     {contacts.length > 1 && (
                                         <div className="flex gap-2 mb-3">
                                             <button
@@ -1275,10 +1533,28 @@
                         <>
                             <button onClick={() => setCurrentEventId(null)} className={`text-sm mb-3 underline text-left text-slate-100`}>&larr; All Events</button>
 
-                            <div className="mb-4">
-                                <h3 className={`text-xl font-bold text-blue-500`}>{currentEvent.title}</h3>
-                                <p className={`text-sm text-slate-500`}>{currentEvent.date || 'No date set'}</p>
+                            <div className="mb-1 flex items-start justify-between gap-3">
+                                <div>
+                                    <h3 className={`text-xl font-bold text-blue-500`}>{currentEvent.title}</h3>
+                                    <p className={`text-sm text-slate-500`}>{formatEventDateTime(currentEvent)}</p>
+                                </div>
+                                {calendarFileLink(currentEvent) && (
+                                    <a
+                                        href={calendarFileLink(currentEvent)}
+                                        download={`${(currentEvent.title || 'event').replace(/[^a-z0-9]/gi, '_')}.ics`}
+                                        className="shrink-0 px-3 py-2 rounded-lg text-xs font-semibold bg-slate-900 text-slate-100 border border-slate-700 hover:bg-slate-800 whitespace-nowrap"
+                                    >
+                                        📅 Add to Calendar
+                                    </a>
+                                )}
                             </div>
+                            {currentEvent.date && (
+                                <p className="text-xs text-slate-500 mb-4">
+                                    {currentEvent.icsUrl
+                                        ? '✓ Invitees will get a calendar link too when you text/email them'
+                                        : (window.__currentUser ? 'Preparing a shareable calendar link for invitees…' : 'Log in to include a calendar link when texting/emailing invitees')}
+                                </p>
+                            )}
 
                             <div className="grid grid-cols-4 gap-2 mb-4">
                                 <div className={`bg-slate-900/60 rounded-lg p-3 text-center`}>
