@@ -790,6 +790,9 @@
             };
 
             const deleteEvent = (id) => {
+                const event = events.find(e => e.id === id);
+                const label = event ? `"${event.title}"` : 'this event';
+                if (!confirm(`Delete ${label}? This can't be undone.`)) return;
                 setEvents(prev => prev.filter(e => e.id !== id));
                 if (currentEventId === id) setCurrentEventId(null);
             };
