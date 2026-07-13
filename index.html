@@ -1222,6 +1222,7 @@
             // actually sending, so editing your message doesn't require retyping it.
             const getOutgoingMessage = (event) => {
                 const base = getMessage(event);
+                if (event.includeCalendarLink === false) return base;
                 const link = event.icsShortUrl || event.icsUrl;
                 return link ? `${base}\n\nAdd to calendar: ${link}` : base;
             };
@@ -1565,11 +1566,22 @@
                                 )}
                             </div>
                             {currentEvent.date && (
-                                <p className="text-xs text-slate-500 mb-4">
-                                    {currentEvent.icsUrl
-                                        ? '✓ Invitees will get a calendar link too when you text/email them'
-                                        : (window.__currentUser ? 'Preparing a shareable calendar link for invitees…' : 'Log in to include a calendar link when texting/emailing invitees')}
-                                </p>
+                                <div className="mb-4">
+                                    {currentEvent.icsUrl ? (
+                                        <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={currentEvent.includeCalendarLink !== false}
+                                                onChange={(e) => updateCurrentEvent(ev => ({ ...ev, includeCalendarLink: e.target.checked }))}
+                                            />
+                                            Include calendar link when texting/emailing invitees
+                                        </label>
+                                    ) : (
+                                        <p className="text-xs text-slate-500">
+                                            {window.__currentUser ? 'Preparing a shareable calendar link for invitees…' : 'Log in to include a calendar link when texting/emailing invitees'}
+                                        </p>
+                                    )}
+                                </div>
                             )}
 
                             <div className="grid grid-cols-4 gap-2 mb-4">
