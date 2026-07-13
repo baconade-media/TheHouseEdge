@@ -1020,7 +1020,10 @@
                 });
 
             return (
-                <div className={`${mainCardBgClass} p-5 sm:p-6 rounded-2xl shadow-2xl w-[92vw] max-w-[1400px] flex flex-col transition-colors duration-500 relative`}>
+                <div
+                    className={`${mainCardBgClass} p-5 sm:p-6 rounded-2xl shadow-2xl w-[92vw] max-w-[1400px] flex flex-col transition-colors duration-500 relative`}
+                    style={{ margin: 'auto' }}
+                >
                     <button
                         onClick={onBackToHome}
                         className="fixed z-30 px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
@@ -5595,9 +5598,8 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
       <AuthWidget user={authUser} theme={theme} hidden={currentView === 'tracking'} />
       <div
         className={`zoom-scale-container min-h-screen flex flex-col items-center font-inter transition-colors duration-500 ${appBgClass} p-4 ${(currentView === 'invites' || currentView === 'tracking') ? 'hidden' : ''}`}
-        style={{ zoom: uiScale, minHeight: '100dvh', justifyContent: 'safe center' }}
+        style={{ zoom: uiScale, minHeight: '100dvh' }}
       >
-
 
       {/*
         All views are mounted at all times; only their visibility is toggled.
@@ -5613,7 +5615,7 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
         CSS) so the Tournament Clock, High Hand timer, and Tracking app all keep
         running in the background while you're on a different tab.
       */}
-      <div className={currentView === 'home' ? '' : 'hidden'}>
+      <div className={currentView === 'home' ? '' : 'hidden'} style={{ margin: 'auto' }}>
         <HomeView
           onSelectMode={handleSelectMode}
           theme={theme}
@@ -5623,7 +5625,7 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
       </div>
 
       {visitedViews.has('highHand') && (
-        <div className={currentView === 'highHand' ? '' : 'hidden'}>
+        <div className={currentView === 'highHand' ? '' : 'hidden'} style={{ margin: 'auto' }}>
           <HighHandTimerView
             theme={theme}
             appBgClass={appBgClass}
@@ -5643,7 +5645,7 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
       )}
 
       {visitedViews.has('tournament') && (
-        <div className={currentView === 'tournament' ? '' : 'hidden'}>
+        <div className={currentView === 'tournament' ? '' : 'hidden'} style={{ margin: 'auto' }}>
           <TournamentClockView
             theme={theme}
             appBgClass={appBgClass}
@@ -5672,7 +5674,7 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
       {visitedViews.has('invites') && (
         <div
           className={`min-h-screen flex flex-col items-center font-inter transition-colors duration-500 ${appBgClass} p-4 ${currentView === 'invites' ? '' : 'hidden'}`}
-          style={{ minHeight: '100dvh', justifyContent: 'safe center' }}
+          style={{ minHeight: '100dvh' }}
         >
           <InvitesView
             theme={theme}
