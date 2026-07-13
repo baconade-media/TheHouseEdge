@@ -996,6 +996,31 @@
                 window.location.href = `mailto:${emails.join(',')}?subject=${encodeURIComponent(currentEvent.title + ' - Invite')}&body=${encodeURIComponent(getMessage(currentEvent))}`;
             };
 
+            // A browser can only ever trigger one sms: link per tap, so there's no
+            // way to fire off several separate texts from a single button press --
+            // that's why "Text All Pending" has to bundle everyone into one group
+            // text to work in one tap. This instead walks through pending people
+            // one at a time, so each person gets their own private text instead of
+            // a group thread where everyone can see each other's numbers.
+            const [individualTextQueue, setIndividualTextQueue] = useState(null); // null | array of invitees
+            const [individualTextIndex, setIndividualTextIndex] = useState(0);
+
+            const startIndividualTexting = () => {
+                if (!currentEvent) return;
+                const queue = currentEvent.invitees.filter(i => i.status === 'pending' && i.phone);
+                if (!queue.length) return;
+                setIndividualTextQueue(queue);
+                setIndividualTextIndex(0);
+            };
+            const advanceIndividualTexting = () => {
+                if (individualTextIndex + 1 >= individualTextQueue.length) {
+                    setIndividualTextQueue(null);
+                } else {
+                    setIndividualTextIndex(individualTextIndex + 1);
+                }
+            };
+            const cancelIndividualTexting = () => setIndividualTextQueue(null);
+
             const stats = currentEvent ? {
                 yes: currentEvent.invitees.filter(i => i.status === 'yes').length,
                 no: currentEvent.invitees.filter(i => i.status === 'no').length,
@@ -1298,7 +1323,7 @@
                                 )}
                             </div>
 
-                            <div className="flex gap-2 mb-4">
+                            <div className="flex gap-2 mb-2">
                                 <button onClick={textAllPending} className="flex-1 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold">
                                     Text All Pending
                                 </button>
@@ -1306,6 +1331,9 @@
                                     Email All Pending
                                 </button>
                             </div>
+                            <button onClick={startIndividualTexting} className={`w-full py-2 rounded-lg text-sm font-semibold mb-4 border ${inputBgClass} ${subtextColorClass} border-transparent`}>
+                                Text Individually (one at a time, no group text)
+                            </button>
 
                             <div className={`${sectionBgClass} rounded-xl p-4 mb-4`}>
                                 <h3 className={`text-sm font-bold mb-3 ${subtextColorClass}`}>Who's Invited</h3>
@@ -1381,6 +1409,35 @@
                             </div>
                         </>
                     )}
+
+                    {individualTextQueue && (() => {
+                        const invitee = individualTextQueue[individualTextIndex];
+                        const isLast = individualTextIndex + 1 >= individualTextQueue.length;
+                        return (
+                            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+                                <div className={`w-full max-w-sm rounded-2xl shadow-2xl p-6 text-center ${panelBg}`}>
+                                    <p className={`text-xs font-semibold uppercase mb-2 ${placeholderColorClass}`}>
+                                        Person {individualTextIndex + 1} of {individualTextQueue.length}
+                                    </p>
+                                    <h3 className="text-2xl font-bold mb-1">{invitee.name}</h3>
+                                    <p className={`text-sm mb-6 ${placeholderColorClass}`}>{invitee.phone}</p>
+                                    <a
+                                        href={smsLink(invitee, currentEvent)}
+                                        onClick={() => setTimeout(advanceIndividualTexting, 400)}
+                                        className="block w-full py-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold mb-2"
+                                    >
+                                        Text {invitee.name}
+                                    </a>
+                                    <button onClick={advanceIndividualTexting} className={`w-full py-2 rounded-lg text-sm font-semibold mb-2 ${inputBgClass} ${subtextColorClass}`}>
+                                        Skip this person
+                                    </button>
+                                    <button onClick={cancelIndividualTexting} className={`w-full py-2 rounded-lg border text-sm ${isDark ? 'border-gray-600' : 'border-gray-300'}`}>
+                                        {isLast ? 'Done' : 'Stop here'}
+                                    </button>
+                                </div>
+                            </div>
+                        );
+                    })()}
 
                     {pendingImports && (
                         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
