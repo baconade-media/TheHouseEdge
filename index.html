@@ -5654,8 +5654,12 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
     <>
       <AuthWidget user={authUser} theme={theme} hidden={currentView === 'tracking'} />
       <div
-        className={`zoom-scale-container min-h-screen flex flex-col items-center font-inter transition-colors duration-500 ${appBgClass} p-4 ${(currentView === 'invites' || currentView === 'tracking') ? 'hidden' : ''}`}
-        style={{ zoom: uiScale, minHeight: '100dvh' }}
+        className={`zoom-scale-container min-h-screen flex flex-col items-center font-inter transition-colors duration-500 ${appBgClass} p-4`}
+        style={{
+          zoom: uiScale,
+          minHeight: '100dvh',
+          display: (currentView === 'invites' || currentView === 'tracking') ? 'none' : 'flex'
+        }}
       >
 
       {/*
@@ -5757,7 +5761,7 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
         like the standalone file, unaffected by the rest of the app's zoom.
       */}
       {visitedViews.has('tracking') && (
-        <div className={currentView === 'tracking' ? '' : 'hidden'}>
+        <div style={{ display: currentView === 'tracking' ? 'block' : 'none' }}>
           <TrackingView
             onBackToHome={() => goToView('home')}
           />
