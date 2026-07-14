@@ -3117,12 +3117,34 @@ const getPerPlayerCountForChip = (chipId) => {
 					// is a "normal" blind amount you'd actually see on a real structure
 					// sheet. Generated blinds get snapped to the nearest one of these
 					// instead of raw math that can land on odd numbers like 745.
-					const BLIND_LADDER = [
-						25, 50, 75, 100, 150, 200, 300, 400, 500, 600, 800, 1000,
-						1200, 1500, 2000, 2500, 3000, 4000, 5000, 6000, 8000, 10000,
-						12000, 15000, 20000, 25000, 30000, 40000, 50000, 60000, 80000, 100000,
-						120000, 150000, 200000, 250000, 300000, 400000, 500000, 600000, 800000, 1000000
-					];
+					// Generated programmatically (the standard 1-1.5-2-3-4-5-6-8 pattern
+					// per decade) rather than a short hardcoded list, so it extends far
+					// enough that even a very long, fast-growing tournament never runs
+					// off the top of it. The user's actual smallest chip is prepended if
+					// it falls below the ladder's normal floor (25), so something like a
+					// $5 chip can still be used for the very first blind.
+					const BLIND_LADDER = (() => {
+						const multipliers = [1, 1.5, 2, 3, 4, 5, 6, 8];
+						const ladder = [];
+						for (let decade = 10; decade <= 10000000000; decade *= 10) {
+							multipliers.forEach(m => {
+								const v = Math.round(decade * m);
+								if (v >= 25) ladder.push(v);
+							});
+						}
+						let combined = [...new Set(ladder)].sort((a, b) => a - b);
+
+						const floor = combined[0];
+						if (smallestChip && smallestChip > 0 && smallestChip < floor) {
+							const lowRungs = [];
+							for (const mult of [1, 2, 3, 5, 10, 15, 20]) {
+								const v = smallestChip * mult;
+								if (v < floor) lowRungs.push(v);
+							}
+							combined = [...new Set([...lowRungs, ...combined])].sort((a, b) => a - b);
+						}
+						return combined;
+					})();
 
 					const snapToNiceBlind = (value) => {
 						if (!value || value <= 0) return BLIND_LADDER[0];
@@ -3139,7 +3161,11 @@ const getPerPlayerCountForChip = (chipId) => {
 						for (const v of BLIND_LADDER) {
 							if (v > value) return v;
 						}
-						return BLIND_LADDER[BLIND_LADDER.length - 1] * 2; // fallback if we ever run off the top
+						// Only reachable in truly extreme cases (a tournament so long and
+						// fast-growing it outpaces a ladder already reaching into the tens
+						// of billions) -- scale relative to the value itself so this can
+						// never get stuck repeating the same number.
+						return Math.round(value * 1.5);
 					};
 
 					const buildBlindLevels = (style = 'balanced') => {
@@ -3156,7 +3182,6 @@ const getPerPlayerCountForChip = (chipId) => {
 
 					  const levelsOut = [];
 					  let bb = smallestChip * 2; // start at 2× smallest chip (e.g. 25→50 BB)
-					  const maxBB = highestChip * 40;
 
 					  for (let i = 0; i < numLevels; i++) {
 						// add a 10‑min break every 5th level (optional)
@@ -3174,22 +3199,11 @@ const getPerPlayerCountForChip = (chipId) => {
 
 						// Snap the raw estimate to the nearest standard poker blind value
 						// (25, 50, 75, 100, 150, 200, 300...) instead of raw arithmetic
-						// that can land on an odd number like 745.
+						// that can land on an odd number like 745. No upper cap here --
+						// blinds are free to keep climbing the ladder for as long as the
+						// tournament's time budget calls for more levels.
 						let sb = snapToNiceBlind(bb / 2);
 						let bbFinal = sb * 2;
-
-						// Cap BB at 40 × highest chip denomination
-						if (bbFinal > maxBB) {
-						  sb = snapToNiceBlind(maxBB / 2);
-						  bbFinal = sb * 2;
-						  if (bbFinal > maxBB) {
-							// maxBB itself didn't land on a ladder rung -- step down one
-							// rung so the cap is still respected exactly.
-							const idx = BLIND_LADDER.indexOf(sb);
-							sb = idx > 0 ? BLIND_LADDER[idx - 1] : sb;
-							bbFinal = sb * 2;
-						  }
-						}
 
 						// antes start halfway through, roughly 10% of BB, also snapped
 						let ante = 0;
@@ -3207,17 +3221,6 @@ const getPerPlayerCountForChip = (chipId) => {
 						  if (sb <= lastBlind.sb || bbFinal <= lastBlind.bb) {
 							sb = nextNiceBlindAbove(lastBlind.sb);
 							bbFinal = sb * 2;
-							if (bbFinal > maxBB) {
-							  bbFinal = maxBB;
-							  sb = bbFinal / 2;
-							}
-						  }
-
-						  // If we're still stuck at the cap and can't climb any further,
-						  // extend the previous level's duration instead of pushing a duplicate.
-						  if (bbFinal === lastBlind.bb && sb === lastBlind.sb && bbFinal === maxBB) {
-							lastBlind.duration += levelDuration;
-							continue;
 						  }
 						}
 
