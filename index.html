@@ -175,8 +175,8 @@
 
     <!-- Your React Application Components (transpiled by Babel) -->
     <script type="text/babel">
-        // Destructure useState, useEffect, useRef from React global object
-        const { useState, useEffect, useRef } = React;
+        // Destructure useState, useEffect, useRef, useMemo from React global object
+        const { useState, useEffect, useRef, useMemo } = React;
 
         /**
          * AuthWidget Component
@@ -2839,75 +2839,59 @@ const tryDistributeForTarget = (targetStack, chipPlayers, chipDenominations, bia
     }
   }
 
-  if (bias === 'balanced') {
-    // Genuinely proportional across all denominations (beyond the reserved
-    // baseline above), so no single chip dominates or gets skipped.
-    const shareTarget = remainingValue / n;
-    chipsSorted.forEach((chip, i) => {
-      const cap = capRemainingByChip[i];
-      if (cap <= 0) return;
-      const idealCount = Math.floor(shareTarget / chip.value);
-      const give = Math.max(0, Math.min(idealCount, cap));
-      perPlayer[chip.id] += give;
-      remainingValue -= give * chip.value;
-      capRemainingByChip[i] -= give;
-    });
-    // Fill any remainder smallest-first...
-    for (let i = 0; i < n && remainingValue > 0; i++) {
-      const chip = chipsSorted[i];
-      const cap = capRemainingByChip[i];
-      if (cap <= 0) continue;
-      const maxNeeded = Math.floor(remainingValue / chip.value);
-      const add = Math.min(cap, maxNeeded);
-      if (add > 0) {
-        perPlayer[chip.id] += add;
-        remainingValue -= add * chip.value;
-        capRemainingByChip[i] -= add;
-      }
-    }
-    // ...then largest-first for any final stragglers.
-    for (let i = n - 1; i >= 0 && remainingValue > 0; i--) {
-      const chip = chipsSorted[i];
-      const cap = capRemainingByChip[i];
-      if (cap <= 0) continue;
-      const maxNeeded = Math.floor(remainingValue / chip.value);
-      const add = Math.min(cap, maxNeeded);
-      if (add > 0) {
-        perPlayer[chip.id] += add;
-        remainingValue -= add * chip.value;
-        capRemainingByChip[i] -= add;
-      }
-    }
-  } else {
-    // 'small' favors more, lower-value chips first; 'large' favors fewer,
-    // higher-value chips first.
-    const priorityOrder = bias === 'large'
-      ? Array.from({ length: n }, (_, i) => n - 1 - i)
-      : Array.from({ length: n }, (_, i) => i);
+  // Find an EXACT combination for whatever value is left, using a proper
+  // bounded-knapsack search rather than a greedy fill. A greedy approach
+  // (always maxing out one denomination before moving to the next) can miss
+  // combinations that genuinely exist -- e.g. a lower target should always
+  // be reachable if the chips can make it at all, since you're never
+  // required to use every chip you own. The search order (which
+  // denomination gets "first crack" at low DP values) still leans the
+  // result toward the chosen style without sacrificing correctness.
+  const order = bias === 'large'
+    ? Array.from({ length: n }, (_, i) => n - 1 - i)
+    : bias === 'balanced'
+      ? (() => {
+          // Interleave from the middle outward, so no single end dominates.
+          const seq = [];
+          let lo = Math.floor((n - 1) / 2), hi = lo + 1;
+          while (lo >= 0 || hi < n) {
+            if (lo >= 0) { seq.push(lo); lo--; }
+            if (hi < n) { seq.push(hi); hi++; }
+          }
+          return seq;
+        })()
+      : Array.from({ length: n }, (_, i) => i); // 'small' (default)
 
-    for (const i of priorityOrder) {
-      const chip = chipsSorted[i];
-      const cap = capRemainingByChip[i];
-      if (cap <= 0) continue;
-      const idealCount = Math.floor(remainingValue / chip.value);
-      const give = Math.max(0, Math.min(idealCount, cap));
-      perPlayer[chip.id] += give;
-      remainingValue -= give * chip.value;
-      capRemainingByChip[i] -= give;
-    }
-    for (const i of [...priorityOrder].reverse()) {
-      if (remainingValue <= 0) break;
-      const chip = chipsSorted[i];
-      const cap = capRemainingByChip[i];
-      if (cap <= 0) continue;
-      const maxNeeded = Math.floor(remainingValue / chip.value);
-      const add = Math.min(cap, maxNeeded);
-      if (add > 0) {
-        perPlayer[chip.id] += add;
-        remainingValue -= add * chip.value;
-        capRemainingByChip[i] -= add;
+  // Safety valve: a bounded-knapsack search is roughly O(target × total cap),
+  // which is fast for realistic stacks/chip counts but could get slow for
+  // extreme inputs -- skip it in that case rather than risk hanging the UI.
+  const totalCap = capRemainingByChip.reduce((a, b) => a + Math.max(0, b), 0);
+  if (remainingValue > 0 && remainingValue * totalCap <= 60000000) {
+    const dp = new Array(remainingValue + 1).fill(undefined);
+    dp[0] = new Array(n).fill(0);
+
+    for (const idx of order) {
+      const val = chipsSorted[idx].value;
+      const cap = capRemainingByChip[idx];
+      if (val <= 0 || cap <= 0) continue;
+
+      for (let rep = 0; rep < cap; rep++) {
+        for (let v = remainingValue; v >= val; v--) {
+          if (dp[v] === undefined && dp[v - val] !== undefined) {
+            const next = dp[v - val].slice();
+            next[idx] += 1;
+            dp[v] = next;
+          }
+        }
       }
     }
+
+    if (dp[remainingValue] !== undefined) {
+      chipsSorted.forEach((chip, i) => { perPlayer[chip.id] += dp[remainingValue][i]; });
+      remainingValue = 0;
+    }
+  } else if (remainingValue === 0) {
+    // Nothing left to find -- the reserved baseline already hit the target exactly.
   }
 
   if (remainingValue !== 0) return null; // require exact hit
@@ -3111,7 +3095,10 @@ const autoSuggestedStack =
 
 
 
-const chipDistribution = computePerPlayerChipDistribution();
+const chipDistribution = useMemo(
+  () => computePerPlayerChipDistribution(),
+  [customStackTarget, suggestedStack, chipPlayers, chipDenominations, chipBias, levels]
+);
 
 const idealStack =
   chipDistribution?.idealStack ??
