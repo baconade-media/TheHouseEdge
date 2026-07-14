@@ -2155,7 +2155,7 @@
 		const [chipPresets, setChipPresets] = useState(() => {
 			try { return JSON.parse(localStorage.getItem('pokerChipPresets') || '[]'); } catch (e) { return []; }
 		});
-		const [newPresetName, setNewPresetName] = useState('');
+		const [newChipPresetName, setNewChipPresetName] = useState('');
 
 		useEffect(() => {
 			localStorage.setItem('pokerChipPresets', JSON.stringify(chipPresets));
@@ -2699,7 +2699,7 @@ stack = Math.round(stack / roundingUnit) * roundingUnit;
             // --- Chip Set Presets (save/load whole denomination sets, since
             // different tournament nights may use physically different chip sets) ---
             const saveCurrentAsPreset = () => {
-                const name = newPresetName.trim();
+                const name = newChipPresetName.trim();
                 if (!name) { alert('Enter a name for this chip set first.'); return; }
                 if (!chipDenominations.length) { alert('Add at least one chip denomination first.'); return; }
                 const preset = {
@@ -2708,7 +2708,7 @@ stack = Math.round(stack / roundingUnit) * roundingUnit;
                     denominations: chipDenominations.map(c => ({ value: c.value, color: c.color, quantity: c.quantity || 0 }))
                 };
                 setChipPresets(prev => [...prev, preset]);
-                setNewPresetName('');
+                setNewChipPresetName('');
             };
 
             const loadChipPreset = (presetId) => {
@@ -4235,8 +4235,8 @@ const getPerPlayerCountForChip = (chipId) => {
                                                     <input
                                                         type="text"
                                                         placeholder="Name this chip set…"
-                                                        value={newPresetName}
-                                                        onChange={(e) => setNewPresetName(e.target.value)}
+                                                        value={newChipPresetName}
+                                                        onChange={(e) => setNewChipPresetName(e.target.value)}
                                                         className={`flex-grow px-3 py-2 rounded-md ${inputBgClass} ${inputBorderClass} border ${subtextColorClass}`}
                                                     />
                                                     <button onClick={saveCurrentAsPreset} className="px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold whitespace-nowrap">
