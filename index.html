@@ -2628,13 +2628,32 @@ stack = Math.round(stack / roundingUnit) * roundingUnit;
                 return newPayouts;
             };
 
+            // Generates a smooth, standard-shaped payout curve (1st place gets the
+            // biggest share, decreasing for each place after) for any number of
+            // paid places, always summing to exactly 100%. Used as a sensible
+            // starting point whenever the number of paid places changes -- the
+            // user can still fine-tune individual percentages afterward.
+            const standardPayoutPercentages = (n) => {
+                if (n <= 0) return [];
+                const weights = Array.from({ length: n }, (_, i) => 1 / (i + 1));
+                const totalWeight = weights.reduce((a, b) => a + b, 0);
+                const percentages = weights.map(w => Math.round((w / totalWeight) * 100));
+                const sum = percentages.reduce((a, b) => a + b, 0);
+                if (sum !== 100 && percentages.length > 0) {
+                    percentages[0] += (100 - sum);
+                }
+                return percentages;
+            };
+
             const addPayoutPlace = () => {
                 setPayoutStructure(prevPayouts => {
-                    const nextPlace = (prevPayouts.length > 0
-                        ? Math.max(...prevPayouts.map(p => p.place))
-                        : 0) + 1;
-                    const newPayouts = [...prevPayouts, { id: crypto.randomUUID(), place: nextPlace, percentage: 0 }];
-                    return normalizePayouts(newPayouts); // New places are initially adjustable
+                    const n = prevPayouts.length + 1;
+                    const percentages = standardPayoutPercentages(n);
+                    return percentages.map((pct, idx) => ({
+                        id: crypto.randomUUID(),
+                        place: idx + 1,
+                        percentage: pct
+                    }));
                 });
             };
 
@@ -2665,8 +2684,13 @@ stack = Math.round(stack / roundingUnit) * roundingUnit;
 
             const deletePayoutPlace = (id) => {
                 setPayoutStructure(prevPayouts => {
-                    const remainingPayouts = prevPayouts.filter(payout => payout.id !== id);
-                    return normalizePayouts(remainingPayouts); // Normalize the remaining ones
+                    const remaining = prevPayouts.filter(payout => payout.id !== id).sort((a, b) => a.place - b.place);
+                    const percentages = standardPayoutPercentages(remaining.length);
+                    return remaining.map((payout, idx) => ({
+                        ...payout,
+                        place: idx + 1,
+                        percentage: percentages[idx]
+                    }));
                 });
             };
 			
