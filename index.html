@@ -68,6 +68,10 @@
       .tournament-scoped .bg-gray-200 {
         background-color: var(--tournament-section-bg) !important;
       }
+      .cash-scoped .bg-gray-600,
+      .cash-scoped .bg-gray-200 {
+        background-color: var(--cash-section-bg) !important;
+      }
     </style>
 </head>
 <body>
@@ -4826,7 +4830,7 @@ const getPerPlayerCountForChip = (chipId) => {
         const HighHandTimerView = ({ theme, appBgClass, mainCardBgClass, sectionBgClass, inputBgClass, inputBorderClass, subtextColorClass, placeholderColorClass, headingTextColorClass, onBackToHome, onThemeChange, uiScale, onZoomChange }) => {
             // All states and effects from the original App component related to High Hand Timer
             const [showSettings, setShowSettings] = useState(false);
-            const [highHandSettingsSubView, setHighHandSettingsSubView] = useState('main'); // 'main', 'logo', 'jackpot', 'additionalGames', 'chipSettings'
+            const [highHandSettingsSubView, setHighHandSettingsSubView] = useState('main'); // 'main', 'visual', 'jackpot', 'additionalGames', 'chipSettings'
             const [showAddManageHands, setShowAddManageHands] = useState(false);
             const [isFullscreen, setIsFullscreen] = useState(false);
             const [timeRemaining, setTimeRemaining] = useState(0);
@@ -4840,10 +4844,47 @@ const getPerPlayerCountForChip = (chipId) => {
             const [highHandSelectedSuit, setHighHandSelectedSuit] = useState('');
             const [handOwnerInput, setHandOwnerInput] = useState('');
             const [showLogo, setShowLogo] = useState(true);
-            const [logoHeightVh, setLogoHeightVh] = useState(15); // Changed default from 25 to 15
             const [customLogoUrl, setCustomLogoUrl] = useState('');
-            const [logoTopOffset, setLogoTopOffset] = useState(4);
-            const [logoLeftOffset, setLogoLeftOffset] = useState(12); // Changed default from 4 to 12
+            const [logoPosition, setLogoPosition] = useState('top-right');
+            const [logoSize, setLogoSize] = useState('medium');
+
+            // Curated background color schemes -- same set as Tournament mode, so
+            // switching between Cash Game and Tournament feels consistent.
+            const CASH_COLOR_SCHEMES = {
+                classic: { name: 'Classic Dark', swatch: 'radial-gradient(circle at 50% 0%, #1f2937, #0f172a)', background: 'radial-gradient(circle at 50% 0%, #1f2937, #0f172a)' },
+                casinoGreen: { name: 'Casino Green', swatch: 'radial-gradient(circle at 50% 0%, #1b6b43, #072e1a)', background: 'repeating-linear-gradient(45deg, rgba(255,255,255,0.03) 0px, rgba(255,255,255,0.03) 1px, transparent 1px, transparent 14px), radial-gradient(circle at 50% 0%, #1b6b43, #072e1a)' },
+                midnightBlue: { name: 'Midnight Blue', swatch: 'radial-gradient(circle at 50% 0%, #1e3a8a, #0a1230)', background: 'repeating-linear-gradient(45deg, rgba(255,255,255,0.025) 0px, rgba(255,255,255,0.025) 1px, transparent 1px, transparent 14px), radial-gradient(circle at 50% 0%, #1e3a8a, #0a1230)' },
+                vegasGold: { name: 'Vegas Gold', swatch: 'radial-gradient(circle at 50% 0%, #3a2f0f, #0d0d0d)', background: 'repeating-linear-gradient(45deg, rgba(255,215,0,0.04) 0px, rgba(255,215,0,0.04) 1px, transparent 1px, transparent 14px), radial-gradient(circle at 50% 0%, #3a2f0f, #0d0d0d)' },
+                crimson: { name: 'Crimson Red', swatch: 'radial-gradient(circle at 50% 0%, #7f1d1d, #1a0505)', background: 'repeating-linear-gradient(45deg, rgba(255,255,255,0.025) 0px, rgba(255,255,255,0.025) 1px, transparent 1px, transparent 14px), radial-gradient(circle at 50% 0%, #7f1d1d, #1a0505)' },
+                royalPurple: { name: 'Royal Purple', swatch: 'radial-gradient(circle at 50% 0%, #5b21b6, #1a0a2e)', background: 'repeating-linear-gradient(45deg, rgba(255,255,255,0.025) 0px, rgba(255,255,255,0.025) 1px, transparent 1px, transparent 14px), radial-gradient(circle at 50% 0%, #5b21b6, #1a0a2e)' },
+                oceanTeal: { name: 'Ocean Teal', swatch: 'radial-gradient(circle at 50% 0%, #0f766e, #042f2e)', background: 'repeating-linear-gradient(45deg, rgba(255,255,255,0.025) 0px, rgba(255,255,255,0.025) 1px, transparent 1px, transparent 14px), radial-gradient(circle at 50% 0%, #0f766e, #042f2e)' },
+                sunsetOrange: { name: 'Sunset Orange', swatch: 'radial-gradient(circle at 50% 0%, #c2410c, #2a0e02)', background: 'repeating-linear-gradient(45deg, rgba(255,255,255,0.03) 0px, rgba(255,255,255,0.03) 1px, transparent 1px, transparent 14px), radial-gradient(circle at 50% 0%, #c2410c, #2a0e02)' },
+                charcoalSteel: { name: 'Charcoal Steel', swatch: 'radial-gradient(circle at 50% 0%, #334155, #0b1120)', background: 'repeating-linear-gradient(45deg, rgba(255,255,255,0.02) 0px, rgba(255,255,255,0.02) 1px, transparent 1px, transparent 14px), radial-gradient(circle at 50% 0%, #334155, #0b1120)' },
+                emerald: { name: 'Emerald', swatch: 'radial-gradient(circle at 50% 0%, #047857, #012a1a)', background: 'repeating-linear-gradient(45deg, rgba(255,255,255,0.025) 0px, rgba(255,255,255,0.025) 1px, transparent 1px, transparent 14px), radial-gradient(circle at 50% 0%, #047857, #012a1a)' },
+                roseGold: { name: 'Rose Gold', swatch: 'radial-gradient(circle at 50% 0%, #9f1239, #1f0509)', background: 'repeating-linear-gradient(45deg, rgba(255,200,200,0.03) 0px, rgba(255,200,200,0.03) 1px, transparent 1px, transparent 14px), radial-gradient(circle at 50% 0%, #9f1239, #1f0509)' },
+                iceBlue: { name: 'Ice Blue', swatch: 'radial-gradient(circle at 50% 0%, #0369a1, #041e30)', background: 'repeating-linear-gradient(45deg, rgba(255,255,255,0.03) 0px, rgba(255,255,255,0.03) 1px, transparent 1px, transparent 14px), radial-gradient(circle at 50% 0%, #0369a1, #041e30)' },
+            };
+            const CASH_FONTS = {
+                default: { name: 'Default', family: "'Inter', sans-serif" },
+                bebasNeue: { name: 'Bebas Neue', family: "'Bebas Neue', sans-serif" },
+                oswald: { name: 'Oswald', family: "'Oswald', sans-serif" },
+                montserrat: { name: 'Montserrat', family: "'Montserrat', sans-serif" },
+                rajdhani: { name: 'Rajdhani', family: "'Rajdhani', sans-serif" },
+                playfair: { name: 'Playfair Display', family: "'Playfair Display', serif" },
+                russoOne: { name: 'Russo One', family: "'Russo One', sans-serif" },
+            };
+            const [cashColorScheme, setCashColorScheme] = useState(() => localStorage.getItem('cashColorScheme') || 'classic');
+            const [cashInnerBg, setCashInnerBg] = useState(() => localStorage.getItem('cashInnerBg') || '');
+            const [cashSectionBg, setCashSectionBg] = useState(() => localStorage.getItem('cashSectionBg') || '');
+            const [cashTextColor, setCashTextColor] = useState(() => localStorage.getItem('cashTextColor') || '');
+            const [cashFont, setCashFont] = useState(() => localStorage.getItem('cashFont') || 'default');
+            useEffect(() => {
+                localStorage.setItem('cashColorScheme', cashColorScheme);
+                localStorage.setItem('cashInnerBg', cashInnerBg);
+                localStorage.setItem('cashSectionBg', cashSectionBg);
+                localStorage.setItem('cashTextColor', cashTextColor);
+                localStorage.setItem('cashFont', cashFont);
+            }, [cashColorScheme, cashInnerBg, cashSectionBg, cashTextColor, cashFont]);
 
             // New state for editable High Hand Timer title
             const [highHandTitle, setHighHandTitle] = useState(() => localStorage.getItem('highHandTitle') || 'High Hand Timer');
@@ -5027,15 +5068,12 @@ const [squidGameBounty, setSquidGameBounty] = useState('');
                 if (savedHighHandId && savedHighHandId !== 'null' && savedHighHandId !== 'undefined') { setCurrentHighHandId(savedHighHandId); } else { setCurrentHighHandId(null); }
                 const savedShowLogo = localStorage.getItem('pokerTimerShowLogo');
                 if (savedShowLogo !== null) setShowLogo(JSON.parse(savedShowLogo));
-                const savedLogoHeight = localStorage.getItem('pokerTimerLogoHeightVh');
-                if (savedLogoHeight !== null) setLogoHeightVh(parseInt(savedLogoHeight));
                 const savedCustomLogoUrl = localStorage.getItem('pokerTimerCustomLogoUrl');
-                // FIX: Correctly set the state from localStorage
                 if (savedCustomLogoUrl) { setCustomLogoUrl(savedCustomLogoUrl); }
-                const savedLogoTopOffset = localStorage.getItem('pokerTimerLogoTopOffset');
-                if (savedLogoTopOffset !== null) { setLogoTopOffset(parseInt(savedLogoTopOffset)); }
-                const savedLogoLeftOffset = localStorage.getItem('pokerTimerLogoLeftOffset');
-                if (savedLogoLeftOffset !== null) { setLogoLeftOffset(parseInt(savedLogoLeftOffset)); }
+                const savedLogoPosition = localStorage.getItem('pokerTimerLogoPosition');
+                if (savedLogoPosition) setLogoPosition(savedLogoPosition);
+                const savedLogoSize = localStorage.getItem('pokerTimerLogoSize');
+                if (savedLogoSize) setLogoSize(savedLogoSize);
                 // Load high hand title
                 const savedHighHandTitle = localStorage.getItem('highHandTitle');
                 if (savedHighHandTitle) setHighHandTitle(savedHighHandTitle);
@@ -5102,10 +5140,9 @@ useEffect(() => { localStorage.setItem('showSquidGame', JSON.stringify(showSquid
                 localStorage.setItem('pokerHands', JSON.stringify(pokerHands));
                 localStorage.setItem('currentHighHandId', currentHighHandId);
                 localStorage.setItem('pokerTimerShowLogo', JSON.stringify(showLogo));
-                localStorage.setItem('pokerTimerLogoHeightVh', logoHeightVh.toString());
                 if (customLogoUrl) { localStorage.setItem('pokerTimerCustomLogoUrl', customLogoUrl); } else { localStorage.removeItem('pokerTimerCustomLogoUrl'); }
-                localStorage.setItem('pokerTimerLogoTopOffset', logoTopOffset.toString());
-                localStorage.setItem('pokerTimerLogoLeftOffset', logoLeftOffset.toString());
+                localStorage.setItem('pokerTimerLogoPosition', logoPosition);
+                localStorage.setItem('pokerTimerLogoSize', logoSize);
                 localStorage.setItem('highHandTitle', highHandTitle);
                 // Save Bad Beat Jackpot settings
                 localStorage.setItem('badBeatJackpotAmount', badBeatJackpotAmount.toString());
@@ -5115,7 +5152,7 @@ useEffect(() => { localStorage.setItem('showSquidGame', JSON.stringify(showSquid
                 localStorage.setItem('pokerChipDenominations', JSON.stringify(chipDenominations));
                 localStorage.setItem('showPokerChipDisplay', JSON.stringify(showChipDisplay));
 
-            }, [inputDuration, pokerHands, currentHighHandId, showLogo, logoHeightVh, customLogoUrl, logoTopOffset, logoLeftOffset, highHandTitle, badBeatJackpotAmount, showBadBeatJackpot, badBeatQualificationHand, chipDenominations, showChipDisplay]);
+            }, [inputDuration, pokerHands, currentHighHandId, showLogo, customLogoUrl, logoPosition, logoSize, highHandTitle, badBeatJackpotAmount, showBadBeatJackpot, badBeatQualificationHand, chipDenominations, showChipDisplay]);
 
             // Effect to derive badBeatQualification string from badBeatQualificationHand
             useEffect(() => {
@@ -5262,17 +5299,48 @@ useEffect(() => { localStorage.setItem('showSquidGame', JSON.stringify(showSquid
 
             const highHand = Array.isArray(pokerHands) ? pokerHands.find((hand) => hand.id === currentHighHandId) : undefined;
 
-            const getLogoStyle = (topOffset, leftOffset, rightOffset) => {
-                const style = {
-                    top: `${topOffset}%`,
-                    position: 'absolute'
-                };
-                if (leftOffset !== undefined) {
-                    style.left = `${leftOffset}%`;
-                } else if (rightOffset !== undefined) {
-                    style.right = `${rightOffset}%`;
+            const LOGO_POSITIONS = {
+                'top-left': { top: '2%', left: '2%' },
+                'top-center': { top: '2%', left: '50%', transform: 'translateX(-50%)' },
+                'top-right': { top: '2%', right: '2%' },
+                'bottom-left': { bottom: '2%', left: '2%' },
+                'bottom-center': { bottom: '2%', left: '50%', transform: 'translateX(-50%)' },
+                'bottom-right': { bottom: '2%', right: '2%' },
+            };
+            const LOGO_SIZES = { small: 7, medium: 12, large: 20 }; // vh
+
+            const getLogoStyle = (position) => ({
+                position: 'absolute',
+                ...(LOGO_POSITIONS[position] || LOGO_POSITIONS['top-right'])
+            });
+
+            const [logoUploadError, setLogoUploadError] = useState('');
+            const handleLogoFileUpload = (e) => {
+                const file = e.target.files[0];
+                e.target.value = '';
+                if (!file) return;
+                if (!file.type.startsWith('image/')) {
+                    setLogoUploadError('Please choose an image file.');
+                    return;
                 }
-                return style;
+                setLogoUploadError('');
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const maxDim = 500;
+                        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+                        const canvas = document.createElement('canvas');
+                        canvas.width = Math.round(img.width * scale);
+                        canvas.height = Math.round(img.height * scale);
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                        setCustomLogoUrl(canvas.toDataURL('image/png'));
+                    };
+                    img.onerror = () => setLogoUploadError("Couldn't read that image -- try a different file.");
+                    img.src = ev.target.result;
+                };
+                reader.readAsDataURL(file);
             };
 
             // Bad Beat specific card selection handlers
@@ -5333,7 +5401,17 @@ useEffect(() => { localStorage.setItem('showSquidGame', JSON.stringify(showSquid
 const [showHighHandSettings, setShowHighHandSettings] = useState(false);
 
        return (
-                <div className={`${mainCardBgClass} p-5 rounded-2xl shadow-2xl w-[92vw] max-w-[1400px] flex flex-col transition-colors duration-500 relative`}>
+                <div
+                    className={`cash-scoped ${mainCardBgClass} p-5 rounded-2xl shadow-2xl w-[92vw] max-w-[1400px] flex flex-col transition-colors duration-500 relative`}
+                    style={{
+                        background: cashInnerBg || CASH_COLOR_SCHEMES[cashColorScheme]?.background,
+                        color: cashTextColor || undefined,
+                        fontFamily: CASH_FONTS[cashFont]?.family || undefined,
+                        '--cash-section-bg': cashSectionBg === 'transparent'
+                            ? 'transparent'
+                            : (cashSectionBg || (theme === 'dark' ? '#4b5563' : '#e5e7eb')),
+                    }}
+                >
                     {/* Back to Home Button */}
                     <button
                         onClick={onBackToHome}
@@ -5347,14 +5425,14 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                         <img
                             src={logoToDisplay}
                             alt="Custom Logo"
-                            style={{ maxHeight: `${logoHeightVh}vh`, ...getLogoStyle(logoTopOffset, logoLeftOffset, undefined) }}
+                            style={{ maxHeight: `${LOGO_SIZES[logoSize] || LOGO_SIZES.medium}vh`, ...getLogoStyle(logoPosition) }}
                             className="w-auto object-contain"
                             onError={(e) => {
                                 e.target.onerror = null;
                                 e.target.src = 'https://placehold.co/192x96/cccccc/333333?text=Logo+Error';
                                 e.target.alt = "Logo could not be loaded";
-                                e.target.style.maxHeight = `${logoHeightVh}vh`;
-                                Object.assign(e.target.style, getLogoStyle(logoTopOffset, logoLeftOffset, undefined));
+                                e.target.style.maxHeight = `${LOGO_SIZES[logoSize] || LOGO_SIZES.medium}vh`;
+                                Object.assign(e.target.style, getLogoStyle(logoPosition));
                             }}
                         />
                     )}
@@ -5527,7 +5605,7 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                             <div className={`${mainCardBgClass} p-5 rounded-2xl shadow-2xl w-full ${highHandSettingsSubView === 'chipSettings' ? 'max-w-3xl' : 'max-w-md'} overflow-y-auto max-h-[90vh] transition-colors duration-500`}>
                                 <h2 className={`text-3xl font-bold text-center mb-6 ${headingTextColorClass}`}>
   {highHandSettingsSubView === 'main' ? 'High Hand Settings' :
-   highHandSettingsSubView === 'logo' ? 'Logo Settings' :
+   highHandSettingsSubView === 'visual' ? 'Visual Settings' :
    highHandSettingsSubView === 'jackpot' ? 'Bad Beat Jackpot Settings' :
    highHandSettingsSubView === 'additionalGames' ? 'Additional Games' :
    'Chip Denominations'}
@@ -5566,30 +5644,11 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                                     textSizeClass="text-xl"
                                                 />
                                             </div>
-                                            {/* Theme Toggle Button for High Hand Timer */}
-                                            <div className="flex items-center justify-between">
-                                                <span className={`${subtextColorClass} text-base`}>Toggle Theme:</span>
-                                                <button
-                                                    onClick={() => onThemeChange(theme === 'dark' ? 'light' : 'dark')}
-                                                    className={`${sectionBgClass} p-3 rounded-full shadow-md transition-all duration-200 hover:scale-105`}
-                                                    title="Toggle Theme"
-                                                >
-                                                    {theme === 'dark' ? (
-                                                        <svg xmlns="http://www.w3.org/2000/svg" className={`h-6 w-6 text-yellow-300`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.325 3.325l-.707.707M6.319 6.319l-.707-.707m12.728 0l-.707.707M6.319 17.681l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
-                                                        </svg>
-                                                    ) : (
-                                                        <svg xmlns="http://www.w3.org/2000/svg" className={`h-6 w-6 text-gray-800`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
-                                                        </svg>
-                                                    )}
-                                                </button>
-                                            </div>
                                         </div>
                                         <div className="flex flex-col space-y-4">
-                                            <button onClick={() => setHighHandSettingsSubView('logo')} className="px-6 py-3 bg-teal-600 hover:bg-teal-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200">
-										  Logo Settings
-										</button>
+                                            <button onClick={() => setHighHandSettingsSubView('visual')} className="px-6 py-3 bg-teal-600 hover:bg-teal-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200">
+										  Visual Settings
+									</button>
 										<button onClick={() => setHighHandSettingsSubView('jackpot')} className="px-6 py-3 bg-orange-600 hover:bg-orange-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200">
 										  Bad Beat Jackpot
 										</button>
@@ -5611,10 +5670,125 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                     </>
                                 )}
 
-                                {/* Logo Settings for High Hand Timer */}
-                                {highHandSettingsSubView === 'logo' && (
+                                {highHandSettingsSubView === 'visual' && (
                                     <>
-                                        <div className="flex flex-col space-y-4 mb-6">
+                                        <div className="flex flex-col space-y-5">
+                                            <div>
+                                                <label className={`text-sm font-semibold ${subtextColorClass} block mb-2`}>Background Color Scheme</label>
+                                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                                                    {Object.entries(CASH_COLOR_SCHEMES).map(([key, scheme]) => (
+                                                        <button
+                                                            key={key}
+                                                            onClick={() => setCashColorScheme(key)}
+                                                            className={`rounded-lg overflow-hidden border-2 transition-all ${cashColorScheme === key ? 'border-blue-500 scale-[1.03]' : 'border-transparent'}`}
+                                                        >
+                                                            <div className="h-14" style={{ background: scheme.swatch }}></div>
+                                                            <div className={`text-xs font-semibold py-1.5 ${sectionBgClass} ${subtextColorClass}`}>
+                                                                {scheme.name}
+                                                            </div>
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+
+                                            <div>
+                                                <label className={`text-sm font-semibold ${subtextColorClass} block mb-2`}>Outer Card Background (overrides the scheme above)</label>
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                    <input
+                                                        type="color"
+                                                        value={cashInnerBg && cashInnerBg !== 'transparent' ? cashInnerBg : '#0f172a'}
+                                                        onChange={(e) => setCashInnerBg(e.target.value)}
+                                                        className="w-12 h-10 rounded-md border border-gray-500 bg-transparent cursor-pointer"
+                                                    />
+                                                    <button
+                                                        onClick={() => setCashInnerBg('transparent')}
+                                                        className={`px-3 py-2 rounded-lg text-xs font-semibold ${cashInnerBg === 'transparent' ? 'bg-blue-600 text-white' : `${sectionBgClass} ${subtextColorClass}`}`}
+                                                    >
+                                                        Transparent
+                                                    </button>
+                                                    {cashInnerBg && (
+                                                        <button onClick={() => setCashInnerBg('')} className="px-3 py-2 rounded-lg text-xs font-semibold border border-gray-500 text-gray-300">
+                                                            Reset to Scheme
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            <div>
+                                                <label className={`text-sm font-semibold ${subtextColorClass} block mb-2`}>Inner Boxes</label>
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                    <input
+                                                        type="color"
+                                                        value={cashSectionBg && cashSectionBg !== 'transparent' ? cashSectionBg : '#4b5563'}
+                                                        onChange={(e) => setCashSectionBg(e.target.value)}
+                                                        className="w-12 h-10 rounded-md border border-gray-500 bg-transparent cursor-pointer"
+                                                    />
+                                                    <button
+                                                        onClick={() => setCashSectionBg('transparent')}
+                                                        className={`px-3 py-2 rounded-lg text-xs font-semibold ${cashSectionBg === 'transparent' ? 'bg-blue-600 text-white' : `${sectionBgClass} ${subtextColorClass}`}`}
+                                                    >
+                                                        Transparent
+                                                    </button>
+                                                    {cashSectionBg && (
+                                                        <button onClick={() => setCashSectionBg('')} className="px-3 py-2 rounded-lg text-xs font-semibold border border-gray-500 text-gray-300">
+                                                            Reset to Default
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            <div>
+                                                <label className={`text-sm font-semibold ${subtextColorClass} block mb-2`}>Text Color</label>
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                    <input
+                                                        type="color"
+                                                        value={cashTextColor || '#ffffff'}
+                                                        onChange={(e) => setCashTextColor(e.target.value)}
+                                                        className="w-12 h-10 rounded-md border border-gray-500 bg-transparent cursor-pointer"
+                                                    />
+                                                    {cashTextColor && (
+                                                        <button onClick={() => setCashTextColor('')} className="px-3 py-2 rounded-lg text-xs font-semibold border border-gray-500 text-gray-300">
+                                                            Reset to Default
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            <div>
+                                                <label className={`text-sm font-semibold ${subtextColorClass} block mb-2`}>Font</label>
+                                                <select
+                                                    value={cashFont}
+                                                    onChange={(e) => setCashFont(e.target.value)}
+                                                    className={`w-full px-3 py-2 rounded-md ${inputBgClass} ${inputBorderClass} border ${subtextColorClass}`}
+                                                    style={{ fontFamily: CASH_FONTS[cashFont]?.family }}
+                                                >
+                                                    {Object.entries(CASH_FONTS).map(([key, font]) => (
+                                                        <option key={key} value={key} style={{ fontFamily: font.family }}>{font.name}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+
+                                            <div className="flex items-center justify-between">
+                                                <span className={`${subtextColorClass} text-base`}>Light / Dark Mode:</span>
+                                                <button
+                                                    onClick={() => onThemeChange(theme === 'dark' ? 'light' : 'dark')}
+                                                    className={`${sectionBgClass} p-3 rounded-full shadow-md transition-all duration-200 hover:scale-105`}
+                                                    title="Toggle Theme"
+                                                >
+                                                    {theme === 'dark' ? (
+                                                        <svg xmlns="http://www.w3.org/2000/svg" className={`h-6 w-6 text-yellow-300`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.325 3.325l-.707.707M6.319 6.319l-.707-.707m12.728 0l-.707.707M6.319 17.681l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+                                                        </svg>
+                                                    ) : (
+                                                        <svg xmlns="http://www.w3.org/2000/svg" className={`h-6 w-6 text-gray-800`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                                                        </svg>
+                                                    )}
+                                                </button>
+                                            </div>
+
+                                            <hr className="border-gray-600/50" />
+
                                             <div className="flex items-center justify-between">
                                                 <span className={`${subtextColorClass} text-base`}>Show Logo:</span>
                                                 <label htmlFor="toggle-logo-highhand" className="flex items-center cursor-pointer">
@@ -5632,55 +5806,78 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                                     </div>
                                                 </label>
                                             </div>
+
                                             {showLogo && (
                                                 <>
-                                                    <div className="flex items-center space-x-2">
-                                                        <label htmlFor="logo-url-highhand" className={`${subtextColorClass} text-base whitespace-nowrap w-32`}>Custom Logo URL:</label>
-                                                        <input
-                                                            id="logo-url-highhand"
-                                                            type="text"
-                                                            value={customLogoUrl}
-                                                            onChange={(e) => setCustomLogoUrl(e.target.value)}
-                                                            placeholder="e.e.g., https://example.com/logo.png"
-                                                            className={`flex-grow px-2 py-1 rounded-md ${inputBgClass} ${inputBorderClass} ${subtextColorClass}`}
-                                                        />
+                                                    <div className={`${sectionBgClass} rounded-lg p-4`}>
+                                                        <label className={`text-sm font-semibold ${subtextColorClass} block mb-3`}>Your Logo</label>
+                                                        <div className="flex items-center gap-4">
+                                                            <div className="w-20 h-20 rounded-lg bg-gray-900/50 border border-gray-600 flex items-center justify-center overflow-hidden shrink-0">
+                                                                <img src={logoToDisplay} alt="Logo preview" className="max-w-full max-h-full object-contain" />
+                                                            </div>
+                                                            <div className="flex flex-col gap-2 flex-grow">
+                                                                <input
+                                                                    type="file"
+                                                                    id="logo-file-upload-highhand"
+                                                                    accept="image/*"
+                                                                    className="hidden"
+                                                                    onChange={handleLogoFileUpload}
+                                                                />
+                                                                <button
+                                                                    onClick={() => document.getElementById('logo-file-upload-highhand').click()}
+                                                                    className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold"
+                                                                >
+                                                                    📁 Upload Your Own Logo
+                                                                </button>
+                                                                {customLogoUrl && (
+                                                                    <button
+                                                                        onClick={() => setCustomLogoUrl('')}
+                                                                        className="px-4 py-2 rounded-lg border border-gray-500 text-sm text-gray-300"
+                                                                    >
+                                                                        Remove (use default)
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                        {logoUploadError && <p className="text-red-400 text-xs mt-2">{logoUploadError}</p>}
                                                     </div>
-                                                    <div className="flex items-center space-x-2">
-                                                        <label className={`${subtextColorClass} text-base whitespace-nowrap w-32`}>Logo Height (vh):</label>
-                                                        <NumberSpinner
-                                                            value={logoHeightVh}
-                                                            min={10} max={80} step={1}
-                                                            onChange={setLogoHeightVh}
-                                                            theme={theme}
-                                                            widthClass="w-24"
-                                                            textSizeClass="text-xl"
-                                                        />
+
+                                                    <div>
+                                                        <label className={`text-sm font-semibold ${subtextColorClass} block mb-2`}>Position</label>
+                                                        <div className="grid grid-cols-3 gap-2">
+                                                            {[
+                                                                ['top-left', 'Top Left'], ['top-center', 'Top Center'], ['top-right', 'Top Right'],
+                                                                ['bottom-left', 'Bottom Left'], ['bottom-center', 'Bottom Center'], ['bottom-right', 'Bottom Right'],
+                                                            ].map(([key, label]) => (
+                                                                <button
+                                                                    key={key}
+                                                                    onClick={() => setLogoPosition(key)}
+                                                                    className={`py-3 rounded-lg text-xs font-semibold transition-all ${logoPosition === key ? 'bg-blue-600 text-white' : `${sectionBgClass} ${subtextColorClass}`}`}
+                                                                >
+                                                                    {label}
+                                                                </button>
+                                                            ))}
+                                                        </div>
                                                     </div>
-                                                    <div className="flex items-center space-x-2">
-                                                        <label className={`${subtextColorClass} text-base whitespace-nowrap w-32`}>Logo Top Offset (%):</label>
-                                                        <NumberSpinner
-                                                            value={logoTopOffset}
-                                                            min={0} max={90} step={1}
-                                                            onChange={setLogoTopOffset}
-                                                            theme={theme}
-                                                            widthClass="w-24"
-                                                            textSizeClass="text-xl"
-                                                        />
-                                                    </div>
-                                                    <div className="flex items-center space-x-2">
-                                                        <label className={`${subtextColorClass} text-base whitespace-nowrap w-32`}>Logo Left Offset (%):</label>
-                                                        <NumberSpinner
-                                                            value={logoLeftOffset}
-                                                            min={0} max={90} step={1}
-                                                            onChange={setLogoLeftOffset}
-                                                            theme={theme}
-                                                            widthClass="w-24"
-                                                            textSizeClass="text-xl"
-                                                        />
+
+                                                    <div>
+                                                        <label className={`text-sm font-semibold ${subtextColorClass} block mb-2`}>Size</label>
+                                                        <div className="grid grid-cols-3 gap-2">
+                                                            {['small', 'medium', 'large'].map(sizeKey => (
+                                                                <button
+                                                                    key={sizeKey}
+                                                                    onClick={() => setLogoSize(sizeKey)}
+                                                                    className={`py-3 rounded-lg text-sm font-semibold capitalize transition-all ${logoSize === sizeKey ? 'bg-blue-600 text-white' : `${sectionBgClass} ${subtextColorClass}`}`}
+                                                                >
+                                                                    {sizeKey}
+                                                                </button>
+                                                            ))}
+                                                        </div>
                                                     </div>
                                                 </>
                                             )}
                                         </div>
+
                                         <div className="flex justify-between mt-8">
                                             <button onClick={() => setHighHandSettingsSubView('main')} className="px-6 py-3 bg-gray-500 hover:bg-gray-600 text-white font-semibold rounded-lg shadow-md transition-all duration-200">
                                                 Back to Main Settings
@@ -5689,7 +5886,7 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                                 setShowSettings(false);
                                                 setHighHandSettingsSubView('main');
                                             }} className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200">
-                                                Save Logo Settings
+                                                Save Visual Settings
                                             </button>
                                         </div>
                                     </>
