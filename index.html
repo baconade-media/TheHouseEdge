@@ -167,6 +167,17 @@
       // risk for a pre-payment, friends-and-family stage. Once real billing is
       // connected, tier should be set by a trusted backend (e.g. a Cloud
       // Function reacting to a Stripe webhook) instead of client code.
+      // Whether someone currently has Pro-level access -- true if they're
+      // actually on the Pro tier, OR if they're in the middle of an active
+      // trial. Used everywhere the app needs to ask "does this person get Pro
+      // features," instead of checking `tier` directly.
+      window.__isEffectivelyPro = (data) => {
+        if (!data) return false;
+        if (data.tier === 'pro') return true;
+        if (data.trialEndsAt && data.trialEndsAt > Date.now()) return true;
+        return false;
+      };
+
       async function __resolveUserTier(user) {
         const ref = window.__firebaseDb.collection('userSettings').doc(user.uid);
         try {
@@ -191,12 +202,19 @@
             await ref.set(updates, { merge: true });
           }
 
-          window.__userTier = updates.tier || data?.tier || 'free';
-          window.__isAdmin = typeof updates.isAdmin !== 'undefined' ? updates.isAdmin : !!data?.isAdmin;
+          const merged = { ...data, ...updates };
+          window.__userTier = merged.tier || 'free';
+          window.__isAdmin = !!merged.isAdmin;
+          window.__trialEndsAt = merged.trialEndsAt || null;
+          window.__trialUsed = !!merged.trialUsed;
+          window.__isEffectivePro = window.__isEffectivelyPro(merged);
         } catch (e) {
           console.error('Could not resolve user tier:', e);
           window.__userTier = 'free';
           window.__isAdmin = false;
+          window.__trialEndsAt = null;
+          window.__trialUsed = false;
+          window.__isEffectivePro = false;
         }
       }
 
@@ -287,6 +305,20 @@
                 }
             };
 
+            const grantTrial = async (member) => {
+                const trialEnd = Date.now() + 7 * 24 * 60 * 60 * 1000;
+                setBusyId(member.id);
+                try {
+                    await window.__firebaseDb.collection('userSettings').doc(member.id).set({ trialEndsAt: trialEnd, trialUsed: true }, { merge: true });
+                    setMembers(prev => prev.map(m => m.id === member.id ? { ...m, trialEndsAt: trialEnd, trialUsed: true } : m));
+                } catch (e) {
+                    console.error('Could not grant trial:', e);
+                    alert("Couldn't start a trial for that member.");
+                } finally {
+                    setBusyId(null);
+                }
+            };
+
             const proCount = members ? members.filter(m => m.tier === 'pro').length : 0;
             const freeCount = members ? members.filter(m => m.tier !== 'pro').length : 0;
 
@@ -311,12 +343,16 @@
 
                         {members && members.length > 0 && (
                             <div className="space-y-2">
-                                {members.map(member => (
+                                {members.map(member => {
+                                    const onTrial = member.trialEndsAt && member.trialEndsAt > Date.now();
+                                    const trialDaysLeft = onTrial ? Math.max(1, Math.ceil((member.trialEndsAt - Date.now()) / (24 * 60 * 60 * 1000))) : 0;
+                                    return (
                                     <div key={member.id} className="bg-gray-700 rounded-lg p-3 flex items-center justify-between gap-3">
                                         <div className="min-w-0">
                                             <div className="font-semibold truncate flex items-center gap-2">
                                                 {member.email || member.id}
                                                 {member.isAdmin && <span className="text-[10px] font-bold uppercase bg-purple-600 px-2 py-0.5 rounded-full">Admin</span>}
+                                                {onTrial && <span className="text-[10px] font-bold uppercase bg-blue-500/30 border border-blue-400/50 px-2 py-0.5 rounded-full">Trial · {trialDaysLeft}d left</span>}
                                             </div>
                                             <div className="text-xs text-gray-400">
                                                 Joined {member.createdAt ? new Date(member.createdAt).toLocaleDateString() : 'Unknown'}
@@ -327,6 +363,15 @@
                                             <span className={`text-xs font-bold uppercase px-2 py-1 rounded-full ${member.tier === 'pro' ? 'bg-blue-600' : 'bg-gray-600'}`}>
                                                 {member.tier === 'pro' ? 'Pro' : 'Free'}
                                             </span>
+                                            {member.tier !== 'pro' && !onTrial && (
+                                                <button
+                                                    onClick={() => grantTrial(member)}
+                                                    disabled={busyId === member.id}
+                                                    className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-gray-600 hover:bg-gray-500 disabled:opacity-50"
+                                                >
+                                                    {busyId === member.id ? '…' : (member.trialUsed ? 'Restart Trial' : 'Grant Trial')}
+                                                </button>
+                                            )}
                                             <button
                                                 onClick={() => toggleTier(member)}
                                                 disabled={busyId === member.id}
@@ -336,7 +381,8 @@
                                             </button>
                                         </div>
                                     </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         )}
                     </div>
@@ -344,7 +390,7 @@
             );
         };
 
-        const AuthWidget = ({ user, theme, hidden, isAdmin, onGoToAdmin }) => {
+        const AuthWidget = ({ user, theme, hidden, isAdmin, onGoToAdmin, userTier, trialEndsAt, trialUsed, onStartTrial }) => {
             const [open, setOpen] = useState(false);
             const [mode, setMode] = useState('login'); // 'login' | 'signup'
             const [email, setEmail] = useState('');
@@ -467,6 +513,21 @@
                                         <h2 className="text-lg font-bold mb-2">Account</h2>
                                         <p className="text-sm mb-4 opacity-80">Signed in as {user.email}</p>
                                         <p className="text-xs mb-4 opacity-60">Your settings sync automatically to your account and follow you to any device you log into. All of it is encrypted in transit and at rest, and only visible to you.</p>
+
+                                        {userTier !== 'pro' && trialEndsAt && trialEndsAt > Date.now() && (
+                                            <p className="text-xs text-center mb-3 px-3 py-2 rounded-md bg-blue-600/20 border border-blue-500/40">
+                                                ⏳ Pro trial active — {Math.max(1, Math.ceil((trialEndsAt - Date.now()) / (24 * 60 * 60 * 1000)))} day(s) left
+                                            </p>
+                                        )}
+                                        {userTier !== 'pro' && !trialUsed && (
+                                            <button onClick={onStartTrial} className="w-full py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white font-medium mb-2">
+                                                ⭐ Start 7-Day Free Pro Trial
+                                            </button>
+                                        )}
+                                        {userTier !== 'pro' && trialUsed && !(trialEndsAt && trialEndsAt > Date.now()) && (
+                                            <p className="text-xs text-center mb-3 opacity-60">Your free Pro trial has ended.</p>
+                                        )}
+
                                         {isAdmin && (
                                             <button onClick={() => { setOpen(false); onGoToAdmin(); }} className="w-full py-2 rounded-md bg-purple-600 hover:bg-purple-700 text-white font-medium mb-2">
                                                 🛠️ Admin Dashboard
@@ -7089,6 +7150,9 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
   const [authUser, setAuthUser] = useState(() => window.__currentUser);
   const [userTier, setUserTier] = useState(() => window.__userTier);
   const [isAdmin, setIsAdmin] = useState(() => window.__isAdmin);
+  const [trialEndsAt, setTrialEndsAt] = useState(() => window.__trialEndsAt);
+  const [trialUsed, setTrialUsed] = useState(() => window.__trialUsed);
+  const isEffectivePro = userTier === 'pro' || (trialEndsAt && trialEndsAt > Date.now());
 
   const goToView = (view) => {
     setCurrentView(view);
@@ -7103,13 +7167,39 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
         await window.__resolveUserTier(user);
         setUserTier(window.__userTier);
         setIsAdmin(window.__isAdmin);
+        setTrialEndsAt(window.__trialEndsAt);
+        setTrialUsed(window.__trialUsed);
       } else {
         setUserTier(null);
         setIsAdmin(false);
+        setTrialEndsAt(null);
+        setTrialUsed(false);
       }
     });
     return unsubscribe;
   }, []);
+
+  // Starts a 7-day Pro trial for the current user. Guards against repeat use
+  // client-side (the Firestore rules do too -- see the trial section of the
+  // rules), and immediately updates local state so the UI reflects it without
+  // waiting for a full re-auth cycle.
+  const startTrial = async () => {
+    if (!authUser || trialUsed || userTier === 'pro') return;
+    const trialEnd = Date.now() + 7 * 24 * 60 * 60 * 1000;
+    try {
+      await window.__firebaseDb.collection('userSettings').doc(authUser.uid).set({
+        trialEndsAt: trialEnd,
+        trialUsed: true,
+      }, { merge: true });
+      window.__trialEndsAt = trialEnd;
+      window.__trialUsed = true;
+      setTrialEndsAt(trialEnd);
+      setTrialUsed(true);
+    } catch (e) {
+      console.error('Could not start trial:', e);
+      alert("Couldn't start your trial -- please try again in a moment.");
+    }
+  };
 
   useEffect(() => {
     const savedTheme = localStorage.getItem('pokerTimerTheme') || 'dark';
@@ -7206,7 +7296,17 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
 
   return (
     <>
-      <AuthWidget user={authUser} theme={theme} hidden={currentView === 'tracking'} isAdmin={isAdmin} onGoToAdmin={() => goToView('admin')} />
+      <AuthWidget
+        user={authUser}
+        theme={theme}
+        hidden={currentView === 'tracking'}
+        isAdmin={isAdmin}
+        onGoToAdmin={() => goToView('admin')}
+        userTier={userTier}
+        trialEndsAt={trialEndsAt}
+        trialUsed={trialUsed}
+        onStartTrial={startTrial}
+      />
       <div
         className={`zoom-scale-container min-h-screen flex flex-col items-center font-inter transition-colors duration-500 ${appBgClass} p-4`}
         style={{
