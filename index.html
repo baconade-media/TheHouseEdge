@@ -810,6 +810,148 @@
         };
 
         /**
+         * WheelPicker Component
+         * A reusable iOS-style scroll wheel for picking a number, usable anywhere
+         * a plain number input or NumberSpinner was used before. Works with touch
+         * swipe, trackpad/mouse-wheel scroll (both are just native scrolling on
+         * the underlying div), and click/tap via the +/- buttons on either side --
+         * so it's equally usable on mobile and desktop regardless of input method.
+         *
+         * Callers should pick a `step` that keeps the total number of values
+         * reasonable (a few hundred at most) -- e.g. step=25 for a $0-$5000
+         * range, not step=1, to avoid rendering thousands of rows.
+         *
+         * @param {number} value - current value
+         * @param {function} onChange - called with the new value
+         * @param {number} min / max / step
+         * @param {function} [formatValue] - (v) => display string, e.g. v => `$${v}`
+         * @param {string} [width] - CSS width for the wheel itself, default '5rem'
+         */
+        // Standard chip/currency denominations -- covers cash-game cent values
+        // through large tournament chip values. Used as the value list for chip
+        // "Value" wheels, since real denominations aren't evenly spaced (no
+        // fixed step would sensibly cover both $0.01 and $100,000).
+        const STANDARD_CHIP_DENOMINATIONS = [
+            0.01, 0.05, 0.10, 0.25, 0.50,
+            1, 2, 5, 10, 20, 25, 50,
+            100, 250, 500, 1000, 2500, 5000,
+            10000, 25000, 50000, 100000
+        ];
+
+        const WheelPicker = ({ value, onChange, min, max, step = 1, values: customValues, formatValue, width = '5rem' }) => {
+            const wheelRef = useRef(null);
+            const ITEM_HEIGHT = 36;
+            const VISIBLE_ROWS = 3;
+            const PADDING = ITEM_HEIGHT; // one row above/below so first/last can center
+            const RENDER_BUFFER = 12; // rows rendered above/below the current position
+
+            // Either an explicit list of values (e.g. standard chip denominations,
+            // which aren't evenly spaced) or a linear min/max/step range.
+            const values = useMemo(() => {
+                if (customValues && customValues.length) {
+                    return [...customValues].sort((a, b) => a - b);
+                }
+                const out = [];
+                const lo = Math.min(min, max), hi = Math.max(min, max);
+                for (let v = lo; v <= hi + step / 2; v += step) {
+                    out.push(Math.round(v * 1e6) / 1e6); // guard against float drift
+                }
+                return out.length ? out : [lo];
+            }, [min, max, step, customValues]);
+
+            const clampToValues = (v) => {
+                let closest = values[0], minDiff = Math.abs(v - closest);
+                for (const cand of values) {
+                    const diff = Math.abs(v - cand);
+                    if (diff < minDiff) { minDiff = diff; closest = cand; }
+                }
+                return closest;
+            };
+
+            // Only the rows near the current scroll position are actually
+            // rendered -- large ranges (e.g. $1 steps up to $20,000) would
+            // otherwise mean thousands of DOM nodes and a laggy wheel. The
+            // rest of the scrollable height is simulated with padding.
+            const [scrollTop, setScrollTop] = useState(0);
+            const centerIndex = Math.max(0, Math.min(values.length - 1, Math.round(scrollTop / ITEM_HEIGHT)));
+            const startIndex = Math.max(0, centerIndex - RENDER_BUFFER);
+            const endIndex = Math.min(values.length - 1, centerIndex + RENDER_BUFFER);
+            const visibleValues = values.slice(startIndex, endIndex + 1);
+            const topSpacer = PADDING + startIndex * ITEM_HEIGHT;
+            const bottomSpacer = PADDING + (values.length - 1 - endIndex) * ITEM_HEIGHT;
+
+            const handleScroll = () => {
+                if (!wheelRef.current) return;
+                const newScrollTop = wheelRef.current.scrollTop;
+                setScrollTop(newScrollTop);
+                const index = Math.round(newScrollTop / ITEM_HEIGHT);
+                const clamped = Math.max(0, Math.min(values.length - 1, index));
+                const newValue = values[clamped];
+                if (newValue !== undefined && newValue !== value) onChange(newValue);
+            };
+
+            useEffect(() => {
+                if (!wheelRef.current) return;
+                const index = values.findIndex(v => v === clampToValues(value));
+                if (index >= 0) {
+                    const target = index * ITEM_HEIGHT;
+                    if (Math.abs(wheelRef.current.scrollTop - target) > 1) {
+                        wheelRef.current.scrollTop = target;
+                        setScrollTop(target);
+                    }
+                }
+                // eslint-disable-next-line react-hooks/exhaustive-deps
+            }, [value, values]);
+
+            const stepClick = (dir) => {
+                const idx = values.findIndex(v => v === clampToValues(value));
+                const nextIdx = Math.max(0, Math.min(values.length - 1, idx + dir));
+                onChange(values[nextIdx]);
+            };
+
+            return (
+                <div className="inline-flex items-center gap-1.5">
+                    <button
+                        type="button"
+                        onClick={() => stepClick(-1)}
+                        className="w-7 h-7 rounded-full bg-gray-600 hover:bg-gray-500 text-white flex items-center justify-center shrink-0 font-bold"
+                        aria-label="Decrease"
+                    >−</button>
+                    <div className="relative" style={{ height: ITEM_HEIGHT * VISIBLE_ROWS, width }}>
+                        <div
+                            className="absolute inset-x-0 pointer-events-none border-y-2 border-yellow-400/70 z-10"
+                            style={{ top: PADDING, height: ITEM_HEIGHT }}
+                        ></div>
+                        <div
+                            ref={wheelRef}
+                            onScroll={handleScroll}
+                            className="h-full overflow-y-scroll rounded-md bg-gray-900/60"
+                            style={{ scrollSnapType: 'y mandatory' }}
+                        >
+                            <div style={{ height: topSpacer }}></div>
+                            {visibleValues.map(v => (
+                                <div
+                                    key={v}
+                                    className={`flex items-center justify-center font-bold transition-all ${v === value ? 'text-yellow-300 text-base' : 'text-gray-500 text-sm'}`}
+                                    style={{ height: ITEM_HEIGHT, scrollSnapAlign: 'center' }}
+                                >
+                                    {formatValue ? formatValue(v) : v}
+                                </div>
+                            ))}
+                            <div style={{ height: bottomSpacer }}></div>
+                        </div>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => stepClick(1)}
+                        className="w-7 h-7 rounded-full bg-gray-600 hover:bg-gray-500 text-white flex items-center justify-center shrink-0 font-bold"
+                        aria-label="Increase"
+                    >+</button>
+                </div>
+            );
+        };
+
+        /**
          * ZoomWidget Component
          * A manual size control, since browser DPI/zoom settings and window width
          * can make the fixed-width cards look small on some setups. Lets the user
@@ -4366,11 +4508,14 @@ const getPerPlayerCountForChip = (chipId) => {
 
 											  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
 												<label className="text-gray-200 font-semibold text-base md:text-lg whitespace-nowrap">Minutes per Level:</label>
-												<input
-												  type="number"
+												<WheelPicker
 												  value={levelMinutes}
-												  onChange={(e) => setLevelMinutes(Math.max(3, parseInt(e.target.value) || 3))}
-												  className="w-32 px-3 py-2 rounded-lg bg-gray-700 border-2 border-gray-600 text-white text-center font-bold text-lg focus:border-yellow-400 focus:outline-none"
+												  onChange={setLevelMinutes}
+												  min={3}
+												  max={60}
+												  step={1}
+												  formatValue={(v) => `${v} min`}
+												  width="6rem"
 												/>
 											  </div>
 
@@ -4519,13 +4664,13 @@ const getPerPlayerCountForChip = (chipId) => {
                                                     <span className={`${subtextColorClass} font-semibold w-28 text-right`}>
                                                         {payout.place}{payout.place === 1 ? 'st' : payout.place === 2 ? 'nd' : payout.place === 3 ? 'rd' : 'th'} Place:
                                                     </span>
-                                                    <input
-                                                        type="number"
+                                                    <WheelPicker
                                                         value={payout.percentage}
-                                                        onChange={(e) => updatePayoutPlace(payout.id, 'percentage', parseInt(e.target.value) || 0)}
-                                                        min="0"
-                                                        max="100"
-                                                        className={`w-20 px-2 py-1 rounded-md ${inputBgClass} ${inputBorderClass} ${subtextColorClass} text-xl`}
+                                                        onChange={(v) => updatePayoutPlace(payout.id, 'percentage', v)}
+                                                        min={0}
+                                                        max={100}
+                                                        step={1}
+                                                        width="4rem"
                                                     />
                                                     <span className={`${subtextColorClass} text-xl font-semibold`}>%</span>
                                                     <span className={`font-semibold ${subtextColorClass} w-28 text-left ml-4`}>
@@ -4647,14 +4792,14 @@ const getPerPlayerCountForChip = (chipId) => {
                                                     Enter number of players and how many of each chip you own
                                                 </p>
                                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                                                    <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center`}>
+                                                    <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center items-center`}>
                                                         <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5`}>Number of Players</label>
-                                                        <input
-                                                            type="number"
-                                                            min="1"
+                                                        <WheelPicker
                                                             value={chipPlayers}
-                                                            onChange={(e) => setChipPlayers(Math.max(1, parseInt(e.target.value) || 1))}
-                                                            className="w-full px-3 py-2 rounded-md bg-gray-900/80 border border-yellow-400/70 text-yellow-200 font-semibold text-lg focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                                                            onChange={setChipPlayers}
+                                                            min={1}
+                                                            max={50}
+                                                            step={1}
                                                         />
                                                     </div>
                                                     <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center`}>
@@ -4740,30 +4885,29 @@ const getPerPlayerCountForChip = (chipId) => {
                                                         </div>
 
                                                         <div className="grid grid-cols-2 gap-3">
-                                                            <div>
+                                                            <div className="flex flex-col items-center">
                                                                 <label className={`text-xs font-semibold ${subtextColorClass} block mb-1`}>Value</label>
-                                                                <input
-                                                                    type="number"
+                                                                <WheelPicker
                                                                     value={chip.value}
-                                                                    onChange={(e) => updateChipDenomination(chip.id, 'value', parseInt(e.target.value) || 0)}
-                                                                    min="0"
-                                                                    step="1"
-                                                                    className={`w-full px-3 py-2 rounded-md ${inputBgClass} ${inputBorderClass} border ${subtextColorClass}`}
+                                                                    onChange={(v) => updateChipDenomination(chip.id, 'value', v)}
+                                                                    values={STANDARD_CHIP_DENOMINATIONS}
+                                                                    formatValue={(v) => v < 1 ? `$${v.toFixed(2)}` : `$${v.toLocaleString()}`}
+                                                                    width="5rem"
                                                                 />
                                                             </div>
-                                                            <div>
+                                                            <div className="flex flex-col items-center">
                                                                 <label className={`text-xs font-semibold ${subtextColorClass} block mb-1`}>Quantity Owned</label>
-                                                                <input
-                                                                    type="number"
-                                                                    min="0"
-                                                                    className={`w-full px-3 py-2 rounded-md ${inputBgClass} ${inputBorderClass} border ${subtextColorClass}`}
+                                                                <WheelPicker
                                                                     value={chip.quantity ?? 0}
-                                                                    onChange={(e) => {
-                                                                        const qty = parseInt(e.target.value || '0', 10);
+                                                                    onChange={(v) => {
                                                                         setChipDenominations(prev =>
-                                                                            prev.map(c => c.id === chip.id ? { ...c, quantity: isNaN(qty) ? 0 : qty } : c)
+                                                                            prev.map(c => c.id === chip.id ? { ...c, quantity: v } : c)
                                                                         );
                                                                     }}
+                                                                    min={0}
+                                                                    max={999}
+                                                                    step={1}
+                                                                    width="4.5rem"
                                                                 />
                                                             </div>
                                                         </div>
@@ -6389,13 +6533,12 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                         <div className="flex flex-col space-y-4 mb-6">
                                             <div className="flex items-center space-x-2">
                                                 <label htmlFor="jackpot-amount" className={`${subtextColorClass} text-base whitespace-nowrap w-40 text-right`}>Jackpot Amount ($):</label>
-                                                <NumberSpinner
+                                                <WheelPicker
                                                     value={badBeatJackpotAmount}
-                                                    min={0} max={9999999} step={1}
+                                                    min={0} max={25000} step={1}
                                                     onChange={setBadBeatJackpotAmount}
-                                                    theme={theme}
-                                                    widthClass="w-32"
-                                                    textSizeClass="text-xl"
+                                                    formatValue={(v) => `$${v.toLocaleString()}`}
+                                                    width="6rem"
                                                 />
                                             </div>
                                             <div className="flex flex-col items-center justify-center space-y-2 mt-4">
@@ -6702,14 +6845,14 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                                             className="w-full px-3 py-2 rounded-md bg-gray-900/80 border border-cyan-400/70 text-cyan-200 font-semibold text-lg focus:outline-none focus:ring-2 focus:ring-cyan-400"
                                                         />
                                                     </div>
-                                                    <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center`}>
+                                                    <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center items-center`}>
                                                         <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5`}>Number of Players</label>
-                                                        <input
-                                                            type="number"
-                                                            min="1"
+                                                        <WheelPicker
                                                             value={cashPlayers}
-                                                            onChange={(e) => setCashPlayers(Math.max(1, parseInt(e.target.value) || 1))}
-                                                            className="w-full px-3 py-2 rounded-md bg-gray-900/80 border border-cyan-400/70 text-cyan-200 font-semibold text-lg focus:outline-none focus:ring-2 focus:ring-cyan-400"
+                                                            onChange={setCashPlayers}
+                                                            min={1}
+                                                            max={50}
+                                                            step={1}
                                                         />
                                                     </div>
                                                     <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center`}>
@@ -6813,24 +6956,23 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                                             </div>
                                                             <div className="flex items-center gap-2">
                                                                 <label className={`${subtextColorClass} text-sm whitespace-nowrap`}>Value:</label>
-                                                                <input
-                                                                    type="text" // Changed to type="text" to allow decimals more easily
+                                                                <WheelPicker
                                                                     value={chip.value}
-                                                                    onChange={(e) => updateChipDenomination(chip.id, 'value', e.target.value)}
-                                                                    min="0.01" step="any" // Min set to 0.01, step to any for decimals
-                                                                    className={`w-24 px-2 py-1 rounded-md ${inputBgClass} ${inputBorderClass} ${subtextColorClass}`}
-                                                                    inputMode="decimal" // Suggests decimal keyboard on mobile
+                                                                    onChange={(v) => updateChipDenomination(chip.id, 'value', v)}
+                                                                    values={STANDARD_CHIP_DENOMINATIONS}
+                                                                    formatValue={(v) => v < 1 ? `$${v.toFixed(2)}` : `$${v.toLocaleString()}`}
+                                                                    width="5rem"
                                                                 />
                                                             </div>
                                                             <div className="flex items-center gap-2">
                                                                 <label className={`${subtextColorClass} text-sm whitespace-nowrap`}>Owned:</label>
-                                                                <input
-                                                                    type="number"
-                                                                    min="0" step="1"
+                                                                <WheelPicker
                                                                     value={chip.quantity ?? 0}
-                                                                    onChange={(e) => updateChipDenomination(chip.id, 'quantity', e.target.value)}
-                                                                    className={`w-20 px-2 py-1 rounded-md ${inputBgClass} ${inputBorderClass} ${subtextColorClass}`}
-                                                                    inputMode="numeric"
+                                                                    onChange={(v) => updateChipDenomination(chip.id, 'quantity', v)}
+                                                                    min={0}
+                                                                    max={999}
+                                                                    step={1}
+                                                                    width="4.5rem"
                                                                 />
                                                             </div>
                                                             <button
