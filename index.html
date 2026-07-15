@@ -180,42 +180,58 @@
 
       async function __resolveUserTier(user) {
         const ref = window.__firebaseDb.collection('userSettings').doc(user.uid);
+
+        // Read first. If even this fails, we genuinely don't know anything about
+        // this user yet, so falling back to safe defaults (Free, not admin) is
+        // the right move.
+        let data = null;
         try {
           const doc = await ref.get();
-          const data = doc.exists ? doc.data() : null;
-          const updates = {};
-
-          if (!data || typeof data.tier === 'undefined') {
-            updates.tier = (data && (data.dump || data.updatedAt)) ? 'pro' : 'free';
-          }
-          if (!data || typeof data.isAdmin === 'undefined') {
-            updates.isAdmin = false;
-          }
-          if (!data || data.email !== user.email) {
-            updates.email = user.email || '';
-          }
-          if (!data || typeof data.createdAt === 'undefined') {
-            updates.createdAt = user.metadata?.creationTime ? new Date(user.metadata.creationTime).getTime() : Date.now();
-          }
-
-          if (Object.keys(updates).length > 0) {
-            await ref.set(updates, { merge: true });
-          }
-
-          const merged = { ...data, ...updates };
-          window.__userTier = merged.tier || 'free';
-          window.__isAdmin = !!merged.isAdmin;
-          window.__trialEndsAt = merged.trialEndsAt || null;
-          window.__trialUsed = !!merged.trialUsed;
-          window.__isEffectivePro = window.__isEffectivelyPro(merged);
+          data = doc.exists ? doc.data() : null;
         } catch (e) {
-          console.error('Could not resolve user tier:', e);
+          console.error('Could not read user tier data:', e);
           window.__userTier = 'free';
           window.__isAdmin = false;
           window.__trialEndsAt = null;
           window.__trialUsed = false;
           window.__isEffectivePro = false;
+          return;
         }
+
+        // Figure out which fields (if any) need backfilling.
+        const updates = {};
+        if (!data || typeof data.tier === 'undefined') {
+          updates.tier = (data && (data.dump || data.updatedAt)) ? 'pro' : 'free';
+        }
+        if (!data || typeof data.isAdmin === 'undefined') {
+          updates.isAdmin = false;
+        }
+        if (!data || data.email !== user.email) {
+          updates.email = user.email || '';
+        }
+        if (!data || typeof data.createdAt === 'undefined') {
+          updates.createdAt = user.metadata?.creationTime ? new Date(user.metadata.creationTime).getTime() : Date.now();
+        }
+
+        // Try to write the backfill, but a failure here must NOT be allowed to
+        // corrupt what we already successfully read -- e.g. if this write gets
+        // rejected for any reason, an admin's isAdmin:true (already confirmed
+        // via the read above) should never get reset to false just because a
+        // background housekeeping write didn't go through.
+        if (Object.keys(updates).length > 0) {
+          try {
+            await ref.set(updates, { merge: true });
+          } catch (e) {
+            console.error('Could not write tier backfill (continuing with existing data):', e);
+          }
+        }
+
+        const merged = { ...data, ...updates };
+        window.__userTier = merged.tier || 'free';
+        window.__isAdmin = !!merged.isAdmin;
+        window.__trialEndsAt = merged.trialEndsAt || null;
+        window.__trialUsed = !!merged.trialUsed;
+        window.__isEffectivePro = window.__isEffectivelyPro(merged);
       }
 
       // Monkey-patch localStorage.setItem so every existing setting write in the app
