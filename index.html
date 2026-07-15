@@ -4999,14 +4999,23 @@ const getPerPlayerCountForChip = (chipId) => {
             // Same bounded-knapsack exact-match search used by Tournament mode's
             // tryDistributeForTarget, adapted to reserve small chips based on the
             // cash game's actual small blind (instead of a tournament level's SB).
-            const tryDistributeForCashTarget = (targetStack, numPlayers, denominations, bias) => {
-                if (!targetStack || targetStack <= 0) return null;
+            //
+            // Cash games routinely use fractional chip values (micro stakes like
+            // $0.25/$0.50), but the DP below indexes an array by dollar amount --
+            // fractional values would either break that indexing or silently get
+            // truncated. To support decimals, everything here works in integer
+            // CENTS internally (targetStack/denominations are converted to cents
+            // right away) and the final per-player counts are just chip counts,
+            // which are unaffected by the unit -- only effectiveStack/idealStack
+            // need to be converted back to dollars by the caller.
+            const tryDistributeForCashTarget = (targetStackCents, numPlayers, denominationsCents, bias) => {
+                if (!targetStackCents || targetStackCents <= 0) return null;
                 if (!numPlayers || numPlayers <= 0) return null;
-                if (!denominations || denominations.length === 0) return null;
+                if (!denominationsCents || denominationsCents.length === 0) return null;
 
-                const chipsSorted = [...denominations]
-                    .filter(c => c.value > 0 && c.quantity > 0)
-                    .sort((a, b) => a.value - b.value); // small → big
+                const chipsSorted = [...denominationsCents]
+                    .filter(c => c.valueCents > 0 && c.quantity > 0)
+                    .sort((a, b) => a.valueCents - b.valueCents); // small → big
 
                 if (chipsSorted.length === 0) return null;
 
@@ -5018,7 +5027,7 @@ const getPerPlayerCountForChip = (chipId) => {
                 const n = chipsSorted.length;
                 const perPlayer = {};
                 chipsSorted.forEach(chip => { perPlayer[chip.id] = 0; });
-                let remainingValue = targetStack;
+                let remainingValue = targetStackCents;
 
                 // Reserve a practical minimum of the smallest chip up front (enough
                 // to post the actual small/big blind a couple of times over) --
@@ -5029,15 +5038,15 @@ const getPerPlayerCountForChip = (chipId) => {
                 {
                     const smallest = chipsSorted[0];
                     const smallestCap = capRemainingByChip[0];
-                    const referenceSB = cashSmallBlind > 0 ? cashSmallBlind : smallest.value;
+                    const referenceSBCents = cashSmallBlind > 0 ? Math.round(cashSmallBlind * 100) : smallest.valueCents;
                     const desiredMin = Math.min(
                         smallestCap,
-                        Math.ceil((referenceSB * 2) / smallest.value),
-                        Math.floor(remainingValue / smallest.value)
+                        Math.ceil((referenceSBCents * 2) / smallest.valueCents),
+                        Math.floor(remainingValue / smallest.valueCents)
                     );
                     if (desiredMin > 0) {
                         perPlayer[smallest.id] = desiredMin;
-                        remainingValue -= desiredMin * smallest.value;
+                        remainingValue -= desiredMin * smallest.valueCents;
                         capRemainingByChip[0] -= desiredMin;
                     }
                 }
@@ -5062,7 +5071,7 @@ const getPerPlayerCountForChip = (chipId) => {
                     dp[0] = new Array(n).fill(0);
 
                     for (const idx of order) {
-                        const val = chipsSorted[idx].value;
+                        const val = chipsSorted[idx].valueCents;
                         const cap = capRemainingByChip[idx];
                         if (val <= 0 || cap <= 0) continue;
 
@@ -5090,7 +5099,10 @@ const getPerPlayerCountForChip = (chipId) => {
 
             // Finds the closest achievable stack to `ideal` (same "search outward
             // from target" approach Tournament mode uses), scaled by the smallest
-            // owned chip denomination.
+            // owned chip denomination. `ideal` and `denominations` are in dollars
+            // (as entered by the user); everything is converted to integer cents
+            // before being handed to the knapsack search, then converted back to
+            // dollars on the way out so decimal/micro-stakes values work correctly.
             const computeCashDistributionForTarget = (ideal, numPlayers, denominations, bias) => {
                 if (!ideal || ideal <= 0) return null;
                 if (!numPlayers || numPlayers <= 0) return null;
@@ -5099,26 +5111,41 @@ const getPerPlayerCountForChip = (chipId) => {
                 const positiveValues = denominations.map(c => c.value).filter(v => v > 0);
                 if (positiveValues.length === 0) return null;
 
-                const step = Math.min(...positiveValues);
-                const maxSpan = step * 400;
+                // Convert dollars -> integer cents. Rounding to the nearest cent
+                // keeps this robust against floating point input like 0.1 + 0.2.
+                const toCents = (dollars) => Math.round(dollars * 100);
+                const denominationsCents = denominations.map(c => ({
+                    id: c.id,
+                    valueCents: toCents(c.value),
+                    quantity: c.quantity,
+                }));
+                const idealCents = toCents(ideal);
+
+                const stepDollars = Math.min(...positiveValues);
+                const stepCents = Math.max(1, toCents(stepDollars));
+                const maxSpanCents = stepCents * 400;
 
                 let bestResult = null;
                 let bestDiff = Infinity;
 
-                for (let delta = 0; Math.abs(delta) <= maxSpan; ) {
-                    const target = ideal + delta;
-                    if (target > 0) {
-                        const result = tryDistributeForCashTarget(target, numPlayers, denominations, bias);
+                for (let delta = 0; Math.abs(delta) <= maxSpanCents; ) {
+                    const targetCents = idealCents + delta;
+                    if (targetCents > 0) {
+                        const result = tryDistributeForCashTarget(targetCents, numPlayers, denominationsCents, bias);
                         if (result) {
-                            const diff = Math.abs(target - ideal);
+                            const diff = Math.abs(targetCents - idealCents);
                             if (diff < bestDiff) {
                                 bestDiff = diff;
-                                bestResult = { ...result, effectiveStack: target, idealStack: ideal };
+                                bestResult = {
+                                    ...result,
+                                    effectiveStack: Math.round((targetCents / 100) * 100) / 100,
+                                    idealStack: Math.round((idealCents / 100) * 100) / 100,
+                                };
                                 if (diff === 0) break;
                             }
                         }
                     }
-                    if (delta >= 0) { delta = -(delta + step); } else { delta = -delta; }
+                    if (delta >= 0) { delta = -(delta + stepCents); } else { delta = -delta; }
                 }
 
                 return bestResult;
@@ -5132,7 +5159,7 @@ const getPerPlayerCountForChip = (chipId) => {
                 if (!chipDenominations || chipDenominations.length === 0) return null;
                 const lo = Math.min(cashMinBuyIn, cashMaxBuyIn);
                 const hi = Math.max(cashMinBuyIn, cashMaxBuyIn);
-                const mid = Math.round((lo + hi) / 2);
+                const mid = Math.round(((lo + hi) / 2) * 100) / 100; // nearest cent, not nearest dollar
                 return {
                     min: computeCashDistributionForTarget(lo, cashPlayers, chipDenominations, cashChipStyle),
                     mid: lo !== hi ? computeCashDistributionForTarget(mid, cashPlayers, chipDenominations, cashChipStyle) : null,
@@ -6459,20 +6486,22 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                                         <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5`}>Min Buy-in ($)</label>
                                                         <input
                                                             type="number"
-                                                            min="0" step="1"
+                                                            min="0" step="0.01"
                                                             value={cashMinBuyIn}
                                                             onChange={(e) => setCashMinBuyIn(parseFloat(e.target.value) || 0)}
                                                             className="w-full px-3 py-2 rounded-md bg-gray-900/80 border border-cyan-400/70 text-cyan-200 font-semibold text-lg focus:outline-none focus:ring-2 focus:ring-cyan-400"
+                                                            inputMode="decimal"
                                                         />
                                                     </div>
                                                     <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center`}>
                                                         <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5`}>Max Buy-in ($)</label>
                                                         <input
                                                             type="number"
-                                                            min="0" step="1"
+                                                            min="0" step="0.01"
                                                             value={cashMaxBuyIn}
                                                             onChange={(e) => setCashMaxBuyIn(parseFloat(e.target.value) || 0)}
                                                             className="w-full px-3 py-2 rounded-md bg-gray-900/80 border border-cyan-400/70 text-cyan-200 font-semibold text-lg focus:outline-none focus:ring-2 focus:ring-cyan-400"
+                                                            inputMode="decimal"
                                                         />
                                                     </div>
                                                 </div>
@@ -6483,7 +6512,7 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                                         <span className={`text-xs font-semibold ${subtextColorClass} mb-1`}>At Min Buy-in</span>
                                                         {cashDistributions?.min ? (
                                                             <span className={`text-lg font-bold ${cashDistributions.min.effectiveStack === cashDistributions.min.idealStack ? 'text-green-400' : 'text-yellow-300'}`}>
-                                                                ${cashDistributions.min.effectiveStack.toLocaleString()}
+                                                                ${cashDistributions.min.effectiveStack.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                                 {cashDistributions.min.effectiveStack !== cashDistributions.min.idealStack && <span className="text-xs font-normal ml-1">(closest)</span>}
                                                             </span>
                                                         ) : <span className="text-lg font-bold text-gray-500">—</span>}
@@ -6492,7 +6521,7 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                                         <span className={`text-xs font-semibold ${subtextColorClass} mb-1`}>At Mid Buy-in</span>
                                                         {cashDistributions?.mid ? (
                                                             <span className={`text-lg font-bold ${cashDistributions.mid.effectiveStack === cashDistributions.mid.idealStack ? 'text-green-400' : 'text-yellow-300'}`}>
-                                                                ${cashDistributions.mid.effectiveStack.toLocaleString()}
+                                                                ${cashDistributions.mid.effectiveStack.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                                 {cashDistributions.mid.effectiveStack !== cashDistributions.mid.idealStack && <span className="text-xs font-normal ml-1">(closest)</span>}
                                                             </span>
                                                         ) : <span className="text-lg font-bold text-gray-500">—</span>}
@@ -6501,7 +6530,7 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                                         <span className={`text-xs font-semibold ${subtextColorClass} mb-1`}>At Max Buy-in</span>
                                                         {cashDistributions?.max ? (
                                                             <span className={`text-lg font-bold ${cashDistributions.max.effectiveStack === cashDistributions.max.idealStack ? 'text-green-400' : 'text-yellow-300'}`}>
-                                                                ${cashDistributions.max.effectiveStack.toLocaleString()}
+                                                                ${cashDistributions.max.effectiveStack.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                                 {cashDistributions.max.effectiveStack !== cashDistributions.max.idealStack && <span className="text-xs font-normal ml-1">(closest)</span>}
                                                             </span>
                                                         ) : <span className="text-lg font-bold text-gray-500">—</span>}
