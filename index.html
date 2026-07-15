@@ -132,7 +132,7 @@
           window.__firebaseDb.collection('userSettings').doc(window.__currentUser.uid).set({
             dump: JSON.stringify(dump),
             updatedAt: Date.now()
-          }).catch(e => console.error('Cloud push failed:', e));
+          }, { merge: true }).catch(e => console.error('Cloud push failed:', e));
         }, 1200);
       }
 
@@ -151,6 +151,52 @@
           }
         } catch (e) {
           console.error('Cloud pull failed:', e);
+        }
+      }
+
+      // Resolves the user's Free/Pro tier, admin status, and a couple of display
+      // fields for the admin page (email, join date). Anyone who already had a
+      // document before this system existed is grandfathered in as Pro --
+      // brand new accounts (no prior document at all) start on Free.
+      //
+      // Honest limitation: without a backend, this initial grant can't be made
+      // fully tamper-proof against someone editing things via devtools -- a
+      // determined user could theoretically front-run their very first write.
+      // The Firestore rules below do prevent anyone from *repeatedly* changing
+      // their own tier after that first write, which covers the realistic
+      // risk for a pre-payment, friends-and-family stage. Once real billing is
+      // connected, tier should be set by a trusted backend (e.g. a Cloud
+      // Function reacting to a Stripe webhook) instead of client code.
+      async function __resolveUserTier(user) {
+        const ref = window.__firebaseDb.collection('userSettings').doc(user.uid);
+        try {
+          const doc = await ref.get();
+          const data = doc.exists ? doc.data() : null;
+          const updates = {};
+
+          if (!data || typeof data.tier === 'undefined') {
+            updates.tier = (data && (data.dump || data.updatedAt)) ? 'pro' : 'free';
+          }
+          if (!data || typeof data.isAdmin === 'undefined') {
+            updates.isAdmin = false;
+          }
+          if (!data || data.email !== user.email) {
+            updates.email = user.email || '';
+          }
+          if (!data || typeof data.createdAt === 'undefined') {
+            updates.createdAt = user.metadata?.creationTime ? new Date(user.metadata.creationTime).getTime() : Date.now();
+          }
+
+          if (Object.keys(updates).length > 0) {
+            await ref.set(updates, { merge: true });
+          }
+
+          window.__userTier = updates.tier || data?.tier || 'free';
+          window.__isAdmin = typeof updates.isAdmin !== 'undefined' ? updates.isAdmin : !!data?.isAdmin;
+        } catch (e) {
+          console.error('Could not resolve user tier:', e);
+          window.__userTier = 'free';
+          window.__isAdmin = false;
         }
       }
 
@@ -174,6 +220,10 @@
         window.__firebaseAuth.onAuthStateChanged(async (user) => {
           if (user) {
             await __pullFromCloud(user.uid);
+            await __resolveUserTier(user);
+          } else {
+            window.__userTier = null;
+            window.__isAdmin = false;
           }
           window.__currentUser = user;
           if (!settled) {
@@ -199,7 +249,103 @@
          * Small account button (top-right corner) plus a login/signup modal.
          * Handles email/password sign up, sign in, sign out, and password reset.
          */
-        const AuthWidget = ({ user, theme, hidden }) => {
+        // Simple member list for site admins -- shows everyone who's signed up,
+        // their tier, and when they joined, with a button to flip someone's tier
+        // between Free and Pro. Firestore rules restrict both the read (listing
+        // everyone) and the tier-change write to accounts flagged isAdmin.
+        const AdminView = ({ onBackToHome }) => {
+            const [members, setMembers] = useState(null);
+            const [error, setError] = useState('');
+            const [busyId, setBusyId] = useState(null);
+
+            const loadMembers = async () => {
+                setError('');
+                try {
+                    const snapshot = await window.__firebaseDb.collection('userSettings').get();
+                    const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+                    list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+                    setMembers(list);
+                } catch (e) {
+                    console.error('Could not load members:', e);
+                    setError("Couldn't load the member list -- check that the Firestore admin rules are published.");
+                }
+            };
+
+            useEffect(() => { loadMembers(); }, []);
+
+            const toggleTier = async (member) => {
+                const newTier = member.tier === 'pro' ? 'free' : 'pro';
+                setBusyId(member.id);
+                try {
+                    await window.__firebaseDb.collection('userSettings').doc(member.id).set({ tier: newTier }, { merge: true });
+                    setMembers(prev => prev.map(m => m.id === member.id ? { ...m, tier: newTier } : m));
+                } catch (e) {
+                    console.error('Could not update tier:', e);
+                    alert("Couldn't update that member's tier.");
+                } finally {
+                    setBusyId(null);
+                }
+            };
+
+            const proCount = members ? members.filter(m => m.tier === 'pro').length : 0;
+            const freeCount = members ? members.filter(m => m.tier !== 'pro').length : 0;
+
+            return (
+                <div className="min-h-screen flex flex-col items-center bg-gray-900 text-white p-4" style={{ minHeight: '100dvh' }}>
+                    <button
+                        onClick={onBackToHome}
+                        className="fixed z-30 px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
+                        style={{ top: 'max(0.75rem, env(safe-area-inset-top))', left: 'max(0.75rem, env(safe-area-inset-left))' }}
+                    >
+                        &larr; Home
+                    </button>
+                    <div className="bg-gray-800 p-5 sm:p-6 rounded-2xl shadow-2xl w-[92vw] max-w-[900px] mt-16 mb-8" style={{ margin: 'auto' }}>
+                        <h2 className="text-3xl font-black text-center mb-1 text-blue-400">Admin Dashboard</h2>
+                        <p className="text-center text-sm text-gray-400 mb-6">{members ? `${members.length} member(s) · ${proCount} Pro · ${freeCount} Free` : 'Loading…'}</p>
+
+                        {error && <p className="text-red-400 text-sm text-center mb-4">{error}</p>}
+
+                        {members && members.length === 0 && !error && (
+                            <p className="text-center text-gray-400 text-sm">No members found yet.</p>
+                        )}
+
+                        {members && members.length > 0 && (
+                            <div className="space-y-2">
+                                {members.map(member => (
+                                    <div key={member.id} className="bg-gray-700 rounded-lg p-3 flex items-center justify-between gap-3">
+                                        <div className="min-w-0">
+                                            <div className="font-semibold truncate flex items-center gap-2">
+                                                {member.email || member.id}
+                                                {member.isAdmin && <span className="text-[10px] font-bold uppercase bg-purple-600 px-2 py-0.5 rounded-full">Admin</span>}
+                                            </div>
+                                            <div className="text-xs text-gray-400">
+                                                Joined {member.createdAt ? new Date(member.createdAt).toLocaleDateString() : 'Unknown'}
+                                                {member.updatedAt && <> · Last synced {new Date(member.updatedAt).toLocaleDateString()}</>}
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2 shrink-0">
+                                            <span className={`text-xs font-bold uppercase px-2 py-1 rounded-full ${member.tier === 'pro' ? 'bg-blue-600' : 'bg-gray-600'}`}>
+                                                {member.tier === 'pro' ? 'Pro' : 'Free'}
+                                            </span>
+                                            <button
+                                                onClick={() => toggleTier(member)}
+                                                disabled={busyId === member.id}
+                                                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 disabled:opacity-50"
+                                            >
+                                                {busyId === member.id ? '…' : `Make ${member.tier === 'pro' ? 'Free' : 'Pro'}`}
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+
+        const AuthWidget = ({ user, theme, hidden, isAdmin, onGoToAdmin }) => {
             const [open, setOpen] = useState(false);
             const [mode, setMode] = useState('login'); // 'login' | 'signup'
             const [email, setEmail] = useState('');
@@ -322,6 +468,11 @@
                                         <h2 className="text-lg font-bold mb-2">Account</h2>
                                         <p className="text-sm mb-4 opacity-80">Signed in as {user.email}</p>
                                         <p className="text-xs mb-4 opacity-60">Your settings sync automatically to your account and follow you to any device you log into. All of it is encrypted in transit and at rest, and only visible to you.</p>
+                                        {isAdmin && (
+                                            <button onClick={() => { setOpen(false); onGoToAdmin(); }} className="w-full py-2 rounded-md bg-purple-600 hover:bg-purple-700 text-white font-medium mb-2">
+                                                🛠️ Admin Dashboard
+                                            </button>
+                                        )}
                                         <button onClick={handleLogout} className="w-full py-2 rounded-md bg-red-600 text-white font-medium mb-2">
                                             Log Out
                                         </button>
@@ -1870,15 +2021,15 @@
                 house: {
                     title: 'The House',
                     options: [
-                        { mode: 'tracking', label: 'Logbook', color: 'bg-blue-600 hover:bg-blue-700' },
-                        { mode: 'invites', label: 'Invites', color: 'bg-blue-600 hover:bg-blue-700' },
+                        { mode: 'tracking', label: 'Logbook', color: 'bg-purple-600 hover:bg-purple-700' },
+                        { mode: 'invites', label: 'Invites', color: 'bg-pink-600 hover:bg-pink-700' },
                     ]
                 },
                 edge: {
                     title: 'The Edge',
                     options: [
                         { mode: 'highHand', label: 'Cash Game', color: 'bg-blue-600 hover:bg-blue-700' },
-                        { mode: 'tournament', label: 'Tournament', color: 'bg-blue-600 hover:bg-blue-700' },
+                        { mode: 'tournament', label: 'Tournament', color: 'bg-green-600 hover:bg-green-700' },
                     ]
                 }
             };
@@ -1903,13 +2054,13 @@
                     <div className="flex flex-col space-y-6 w-full max-w-sm">
                         <button
                             onClick={() => setActiveGroup('edge')}
-                            className="w-full px-8 py-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-2xl rounded-lg shadow-lg transition-all duration-200 transform hover:scale-105"
+                            className="w-full px-8 py-4 bg-blue-700 hover:bg-blue-800 text-white font-semibold text-2xl rounded-lg shadow-lg transition-all duration-200 transform hover:scale-105"
                         >
                             The Edge
                         </button>
                         <button
                             onClick={() => setActiveGroup('house')}
-                            className="w-full px-8 py-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-2xl rounded-lg shadow-lg transition-all duration-200 transform hover:scale-105"
+                            className="w-full px-8 py-4 bg-purple-700 hover:bg-purple-800 text-white font-semibold text-2xl rounded-lg shadow-lg transition-all duration-200 transform hover:scale-105"
                         >
                             The House
                         </button>
@@ -3737,19 +3888,19 @@ const getPerPlayerCountForChip = (chipId) => {
                                         </button>
                                         <button
                                             onClick={() => setTournamentSettingsSubView('payouts')}
-                                            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
+                                            className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
                                         >
                                             Payout Settings
                                         </button>
                                         <button
                                             onClick={() => setTournamentSettingsSubView('chipSettings')}
-                                            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
+                                            className="px-6 py-3 bg-cyan-600 hover:bg-cyan-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
                                         >
                                             Chip and Stack Settings
                                         </button>
                                         <button
                                             onClick={() => setTournamentSettingsSubView('visual')}
-                                            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
+                                            className="px-6 py-3 bg-teal-600 hover:bg-teal-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
                                         >
                                             Visual Settings
                                         </button>
@@ -4009,7 +4160,7 @@ const getPerPlayerCountForChip = (chipId) => {
                                             </button>
                                             <button
 											  onClick={() => setPendingBreakAfterIndex(0)}
-											  className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
+											  className="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
 											>
 											  Add Break
 											</button>
@@ -4055,7 +4206,7 @@ const getPerPlayerCountForChip = (chipId) => {
         });
         setPendingBreakAfterIndex(null);
       }}
-      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-md transition-all duration-200"
+      className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold rounded-lg shadow-md transition-all duration-200"
     >
       Insert Break
     </button>
@@ -4331,7 +4482,7 @@ const getPerPlayerCountForChip = (chipId) => {
 										  </button>
 										  <button
 											onClick={clearPayoutCounts}
-											className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
+											className="px-6 py-3 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
 										  >
 											Clear Counts
 										  </button>
@@ -4912,11 +5063,11 @@ const getPerPlayerCountForChip = (chipId) => {
 
             // New states for Chip Denominations
             const defaultChipDenominations = [
-                { id: crypto.randomUUID(), color: '#FFFFFF', value: 1, quantity: 0 }, // White
-                { id: crypto.randomUUID(), color: '#FF0000', value: 5, quantity: 0 },  // Red
-                { id: crypto.randomUUID(), color: '#0000FF', value: 10, quantity: 0 }, // Blue
-                { id: crypto.randomUUID(), color: '#008000', value: 25, quantity: 0 }, // Green
-                { id: crypto.randomUUID(), color: '#000000', value: 100, quantity: 0 },// Black
+                { id: crypto.randomUUID(), color: '#FFFFFF', value: 1 }, // White
+                { id: crypto.randomUUID(), color: '#FF0000', value: 5 },  // Red
+                { id: crypto.randomUUID(), color: '#0000FF', value: 10 }, // Blue
+                { id: crypto.randomUUID(), color: '#008000', value: 25 }, // Green
+                { id: crypto.randomUUID(), color: '#000000', value: 100 },// Black
             ];
             const [chipDenominations, setChipDenominations] = useState(() => {
                 const savedChips = localStorage.getItem('pokerChipDenominations');
@@ -4926,257 +5077,6 @@ const getPerPlayerCountForChip = (chipId) => {
                 const savedShowChipDisplay = localStorage.getItem('showPokerChipDisplay');
                 return savedShowChipDisplay !== null ? JSON.parse(savedShowChipDisplay) : true;
             });
-
-            // --- Cash Game chip distribution (stakes/buy-in based, mirrors the
-            // Tournament Smart Builder's algorithm but keyed off min/max buy-in
-            // instead of a single target stack) ---
-            const [cashPlayers, setCashPlayers] = useState(9);
-            const [cashSmallBlind, setCashSmallBlind] = useState(() => parseFloat(localStorage.getItem('cashSmallBlind') || '0.25'));
-            const [cashBigBlind, setCashBigBlind] = useState(() => parseFloat(localStorage.getItem('cashBigBlind') || '0.50'));
-            const [cashMinBuyIn, setCashMinBuyIn] = useState(() => parseFloat(localStorage.getItem('cashMinBuyIn') || '20'));
-            const [cashMaxBuyIn, setCashMaxBuyIn] = useState(() => parseFloat(localStorage.getItem('cashMaxBuyIn') || '100'));
-            // 'easy' | 'balanced' | 'aggressive' -- same role as the Tournament
-            // chip-bias picker (small / balanced / large denominations), just
-            // relabeled for the cash game context.
-            const [cashChipStyle, setCashChipStyle] = useState(() => localStorage.getItem('cashChipStyle') || 'balanced');
-            const [cashChipPresets, setCashChipPresets] = useState(() => {
-                try { return JSON.parse(localStorage.getItem('cashChipPresets') || '[]'); } catch (e) { return []; }
-            });
-            const [newCashChipPresetName, setNewCashChipPresetName] = useState('');
-
-            useEffect(() => {
-                localStorage.setItem('cashSmallBlind', cashSmallBlind);
-                localStorage.setItem('cashBigBlind', cashBigBlind);
-                localStorage.setItem('cashMinBuyIn', cashMinBuyIn);
-                localStorage.setItem('cashMaxBuyIn', cashMaxBuyIn);
-                localStorage.setItem('cashChipStyle', cashChipStyle);
-            }, [cashSmallBlind, cashBigBlind, cashMinBuyIn, cashMaxBuyIn, cashChipStyle]);
-
-            useEffect(() => {
-                localStorage.setItem('cashChipPresets', JSON.stringify(cashChipPresets));
-            }, [cashChipPresets]);
-
-            const saveCashChipPreset = () => {
-                const name = newCashChipPresetName.trim();
-                if (!name) { alert('Enter a name for this chip set first.'); return; }
-                if (!chipDenominations.length) { alert('Add at least one chip denomination first.'); return; }
-                const preset = {
-                    id: Date.now().toString(),
-                    name,
-                    denominations: chipDenominations.map(c => ({ value: parseFloat(c.value) || 0, color: c.color, quantity: c.quantity || 0 }))
-                };
-                setCashChipPresets(prev => [...prev, preset]);
-                setNewCashChipPresetName('');
-            };
-
-            const loadCashChipPreset = (presetId) => {
-                const preset = cashChipPresets.find(p => p.id === presetId);
-                if (!preset) return;
-                if (chipDenominations.length > 0 && !confirm(`Load "${preset.name}"? This replaces your current chip set.`)) return;
-                setChipDenominations(preset.denominations.map(d => ({
-                    id: crypto.randomUUID(),
-                    value: d.value,
-                    color: d.color,
-                    quantity: d.quantity
-                })));
-            };
-
-            const renameCashChipPreset = (presetId) => {
-                const preset = cashChipPresets.find(p => p.id === presetId);
-                if (!preset) return;
-                const newName = prompt('Rename this chip set:', preset.name);
-                if (!newName || !newName.trim()) return;
-                setCashChipPresets(prev => prev.map(p => p.id === presetId ? { ...p, name: newName.trim() } : p));
-            };
-
-            const deleteCashChipPreset = (presetId) => {
-                const preset = cashChipPresets.find(p => p.id === presetId);
-                if (!preset) return;
-                if (!confirm(`Delete the "${preset.name}" chip set preset? This can't be undone.`)) return;
-                setCashChipPresets(prev => prev.filter(p => p.id !== presetId));
-            };
-
-            // Same bounded-knapsack exact-match search used by Tournament mode's
-            // tryDistributeForTarget, adapted to reserve small chips based on the
-            // cash game's actual small blind (instead of a tournament level's SB).
-            //
-            // Cash games routinely use fractional chip values (micro stakes like
-            // $0.25/$0.50), but the DP below indexes an array by dollar amount --
-            // fractional values would either break that indexing or silently get
-            // truncated. To support decimals, everything here works in integer
-            // CENTS internally (targetStack/denominations are converted to cents
-            // right away) and the final per-player counts are just chip counts,
-            // which are unaffected by the unit -- only effectiveStack/idealStack
-            // need to be converted back to dollars by the caller.
-            const tryDistributeForCashTarget = (targetStackCents, numPlayers, denominationsCents, bias) => {
-                if (!targetStackCents || targetStackCents <= 0) return null;
-                if (!numPlayers || numPlayers <= 0) return null;
-                if (!denominationsCents || denominationsCents.length === 0) return null;
-
-                const chipsSorted = [...denominationsCents]
-                    .filter(c => c.valueCents > 0 && c.quantity > 0)
-                    .sort((a, b) => a.valueCents - b.valueCents); // small → big
-
-                if (chipsSorted.length === 0) return null;
-
-                const perPlayerCapByChip = chipsSorted.map(chip =>
-                    Math.floor(chip.quantity / numPlayers)
-                );
-                if (perPlayerCapByChip.every(cap => cap <= 0)) return null;
-
-                const n = chipsSorted.length;
-                const perPlayer = {};
-                chipsSorted.forEach(chip => { perPlayer[chip.id] = 0; });
-                let remainingValue = targetStackCents;
-
-                // Reserve a practical minimum of the smallest chip up front (enough
-                // to post the actual small/big blind a couple of times over) --
-                // this is the fixed "base layer" every buy-in level shares, so a
-                // player who rebuys up from min to max just gets more/bigger chips
-                // stacked on top, not a totally different mix of small chips.
-                const capRemainingByChip = [...perPlayerCapByChip];
-                {
-                    const smallest = chipsSorted[0];
-                    const smallestCap = capRemainingByChip[0];
-                    const referenceSBCents = cashSmallBlind > 0 ? Math.round(cashSmallBlind * 100) : smallest.valueCents;
-                    const desiredMin = Math.min(
-                        smallestCap,
-                        Math.ceil((referenceSBCents * 2) / smallest.valueCents),
-                        Math.floor(remainingValue / smallest.valueCents)
-                    );
-                    if (desiredMin > 0) {
-                        perPlayer[smallest.id] = desiredMin;
-                        remainingValue -= desiredMin * smallest.valueCents;
-                        capRemainingByChip[0] -= desiredMin;
-                    }
-                }
-
-                const order = bias === 'aggressive'
-                    ? Array.from({ length: n }, (_, i) => n - 1 - i)
-                    : bias === 'balanced'
-                        ? (() => {
-                                const seq = [];
-                                let lo = Math.floor((n - 1) / 2), hi = lo + 1;
-                                while (lo >= 0 || hi < n) {
-                                    if (lo >= 0) { seq.push(lo); lo--; }
-                                    if (hi < n) { seq.push(hi); hi++; }
-                                }
-                                return seq;
-                            })()
-                        : Array.from({ length: n }, (_, i) => i); // 'easy' (more small chips)
-
-                const totalCap = capRemainingByChip.reduce((a, b) => a + Math.max(0, b), 0);
-                if (remainingValue > 0 && remainingValue * totalCap <= 60000000) {
-                    const dp = new Array(remainingValue + 1).fill(undefined);
-                    dp[0] = new Array(n).fill(0);
-
-                    for (const idx of order) {
-                        const val = chipsSorted[idx].valueCents;
-                        const cap = capRemainingByChip[idx];
-                        if (val <= 0 || cap <= 0) continue;
-
-                        for (let rep = 0; rep < cap; rep++) {
-                            for (let v = remainingValue; v >= val; v--) {
-                                if (dp[v] === undefined && dp[v - val] !== undefined) {
-                                    const next = dp[v - val].slice();
-                                    next[idx] += 1;
-                                    dp[v] = next;
-                                }
-                            }
-                        }
-                    }
-
-                    if (dp[remainingValue] !== undefined) {
-                        chipsSorted.forEach((chip, i) => { perPlayer[chip.id] += dp[remainingValue][i]; });
-                        remainingValue = 0;
-                    }
-                }
-
-                if (remainingValue !== 0) return null; // require exact hit
-
-                return { perPlayer, chipsSorted };
-            };
-
-            // Finds the closest achievable stack to `ideal` (same "search outward
-            // from target" approach Tournament mode uses), scaled by the smallest
-            // owned chip denomination. `ideal` and `denominations` are in dollars
-            // (as entered by the user); everything is converted to integer cents
-            // before being handed to the knapsack search, then converted back to
-            // dollars on the way out so decimal/micro-stakes values work correctly.
-            const computeCashDistributionForTarget = (ideal, numPlayers, denominations, bias) => {
-                if (!ideal || ideal <= 0) return null;
-                if (!numPlayers || numPlayers <= 0) return null;
-                if (!denominations || denominations.length === 0) return null;
-
-                // chip.value is kept as a raw string while the user is typing it
-                // (so a decimal point isn't eagerly parsed away), so normalize to
-                // a number here before doing any math with it.
-                const numericDenominations = denominations.map(c => ({ ...c, value: parseFloat(c.value) || 0 }));
-
-                const positiveValues = numericDenominations.map(c => c.value).filter(v => v > 0);
-                if (positiveValues.length === 0) return null;
-
-                // Convert dollars -> integer cents. Rounding to the nearest cent
-                // keeps this robust against floating point input like 0.1 + 0.2.
-                const toCents = (dollars) => Math.round(dollars * 100);
-                const denominationsCents = numericDenominations.map(c => ({
-                    id: c.id,
-                    valueCents: toCents(c.value),
-                    quantity: c.quantity,
-                }));
-                const idealCents = toCents(ideal);
-
-                const stepDollars = Math.min(...positiveValues);
-                const stepCents = Math.max(1, toCents(stepDollars));
-                const maxSpanCents = stepCents * 400;
-
-                let bestResult = null;
-                let bestDiff = Infinity;
-
-                for (let delta = 0; Math.abs(delta) <= maxSpanCents; ) {
-                    const targetCents = idealCents + delta;
-                    if (targetCents > 0) {
-                        const result = tryDistributeForCashTarget(targetCents, numPlayers, denominationsCents, bias);
-                        if (result) {
-                            const diff = Math.abs(targetCents - idealCents);
-                            if (diff < bestDiff) {
-                                bestDiff = diff;
-                                bestResult = {
-                                    ...result,
-                                    effectiveStack: Math.round((targetCents / 100) * 100) / 100,
-                                    idealStack: Math.round((idealCents / 100) * 100) / 100,
-                                };
-                                if (diff === 0) break;
-                            }
-                        }
-                    }
-                    if (delta >= 0) { delta = -(delta + stepCents); } else { delta = -delta; }
-                }
-
-                return bestResult;
-            };
-
-            // One distribution per buy-in level: min, mid, and max -- each sharing
-            // the same reserved small-chip base, with only the bigger denominations
-            // scaling up as the target buy-in increases.
-            const cashDistributions = useMemo(() => {
-                if (!cashMinBuyIn || !cashMaxBuyIn || cashMaxBuyIn <= 0 || cashMinBuyIn <= 0) return null;
-                if (!chipDenominations || chipDenominations.length === 0) return null;
-                const lo = Math.min(cashMinBuyIn, cashMaxBuyIn);
-                const hi = Math.max(cashMinBuyIn, cashMaxBuyIn);
-                const mid = Math.round(((lo + hi) / 2) * 100) / 100; // nearest cent, not nearest dollar
-                return {
-                    min: computeCashDistributionForTarget(lo, cashPlayers, chipDenominations, cashChipStyle),
-                    mid: lo !== hi ? computeCashDistributionForTarget(mid, cashPlayers, chipDenominations, cashChipStyle) : null,
-                    max: lo !== hi ? computeCashDistributionForTarget(hi, cashPlayers, chipDenominations, cashChipStyle) : null,
-                };
-            }, [cashMinBuyIn, cashMaxBuyIn, cashPlayers, chipDenominations, cashChipStyle, cashSmallBlind]);
-
-            const getCashPerPlayerCountForChip = (levelResult, chipId) => {
-                if (!levelResult) return 0;
-                return levelResult.perPlayer[chipId] || 0;
-            };
-
 const [show7DeuceGame, setShow7DeuceGame] = useState(false);
 const [showNitGame, setShowNitGame] = useState(false);
 const [showSquidGame, setShowSquidGame] = useState(false);
@@ -5626,30 +5526,15 @@ useEffect(() => { localStorage.setItem('showSquidGame', JSON.stringify(showSquid
             const addChipDenomination = () => {
                 setChipDenominations(prevChips => [
                     ...prevChips,
-                    { id: crypto.randomUUID(), color: '#CCCCCC', value: 0, quantity: 0 } // Default new chip
+                    { id: crypto.randomUUID(), color: '#CCCCCC', value: 0 } // Default new chip
                 ]);
             };
 
             const updateChipDenomination = (id, field, value) => {
                 setChipDenominations(prevChips =>
-                    prevChips.map(chip => {
-                        if (chip.id !== id) return chip;
-                        if (field === 'quantity') {
-                            return { ...chip, quantity: parseFloat(value) || 0 };
-                        }
-                        if (field === 'value') {
-                            // Keep the raw string while typing so a decimal point
-                            // (e.g. "0.", "0.2") isn't eagerly parsed away and
-                            // reset to "0" mid-keystroke. Anything downstream
-                            // that needs a number should read Number(chip.value)
-                            // or parseFloat(chip.value).
-                            if (value === '' || /^-?\d*\.?\d*$/.test(value)) {
-                                return { ...chip, value };
-                            }
-                            return chip; // reject non-numeric input
-                        }
-                        return { ...chip, [field]: value };
-                    })
+                    prevChips.map(chip =>
+                        chip.id === id ? { ...chip, [field]: (field === 'value' ? parseFloat(value) || 0 : value) } : chip
+                    )
                 );
             };
 
@@ -5826,7 +5711,7 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                             <circle cx="20" cy="20" r="8" fill="#ffffff" fillOpacity="0.92" />
                                             <circle cx="20" cy="20" r="8" fill="none" stroke={chip.color} strokeWidth="1.5" />
                                         </svg>
-                                        <span className={`${subtextColorClass} text-base`}>${(parseFloat(chip.value) || 0).toLocaleString(undefined, { minimumFractionDigits: (parseFloat(chip.value) || 0) % 1 !== 0 ? 2 : 0, maximumFractionDigits: 2 })}</span>
+                                        <span className={`${subtextColorClass} text-base`}>${chip.value.toLocaleString()}</span>
                                     </div>
                                 ))}
                             </div>
@@ -5912,16 +5797,16 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                             </div>
                                         </div>
                                         <div className="flex flex-col space-y-4">
-                                            <button onClick={() => setHighHandSettingsSubView('visual')} className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200">
+                                            <button onClick={() => setHighHandSettingsSubView('visual')} className="px-6 py-3 bg-teal-600 hover:bg-teal-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200">
 										  Visual Settings
 									</button>
-										<button onClick={() => setHighHandSettingsSubView('jackpot')} className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200">
+										<button onClick={() => setHighHandSettingsSubView('jackpot')} className="px-6 py-3 bg-orange-600 hover:bg-orange-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200">
 										  Bad Beat Jackpot
 										</button>
-										<button onClick={() => setHighHandSettingsSubView('additionalGames')} className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200">
+										<button onClick={() => setHighHandSettingsSubView('additionalGames')} className="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200">
 										  Additional Games
 										</button>
-										<button onClick={() => setHighHandSettingsSubView('chipSettings')} className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200">
+										<button onClick={() => setHighHandSettingsSubView('chipSettings')} className="px-6 py-3 bg-cyan-600 hover:bg-cyan-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200">
 										  Chip Denominations
 										</button>
 										<div className="flex justify-end mt-8">
@@ -6388,7 +6273,7 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                 {/* Chip Denominations Settings View */}
                                 {highHandSettingsSubView === 'chipSettings' && (
                                     <>
-                                        <div className="flex flex-col space-y-6 mb-6">
+                                        <div className="flex flex-col space-y-4 mb-6">
                                             <div className="flex items-center justify-between">
                                                 <span className={`${subtextColorClass} text-base`}>Show Chip Display:</span>
                                                 <label htmlFor="toggle-chip-display" className="flex items-center cursor-pointer">
@@ -6407,233 +6292,48 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                                 </label>
                                             </div>
 
-                                            {/* Cash Game Chip Set Presets */}
-                                            <div className={`${sectionBgClass} rounded-lg p-3`}>
-                                                <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5 block`}>Chip Set Presets</label>
-                                                <select
-                                                    value=""
-                                                    onChange={(e) => { if (e.target.value) loadCashChipPreset(e.target.value); }}
-                                                    className={`w-full px-3 py-2 rounded-md ${inputBgClass} ${inputBorderClass} border ${subtextColorClass} mb-2`}
-                                                >
-                                                    <option value="">Load a saved chip set…</option>
-                                                    {cashChipPresets.map(p => (
-                                                        <option key={p.id} value={p.id}>{p.name} ({p.denominations.length} chips)</option>
-                                                    ))}
-                                                </select>
-                                                <div className="flex gap-2">
-                                                    <input
-                                                        type="text"
-                                                        placeholder="Name this chip set…"
-                                                        value={newCashChipPresetName}
-                                                        onChange={(e) => setNewCashChipPresetName(e.target.value)}
-                                                        className={`flex-grow px-3 py-2 rounded-md ${inputBgClass} ${inputBorderClass} border ${subtextColorClass}`}
-                                                    />
-                                                    <button onClick={saveCashChipPreset} className="px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold whitespace-nowrap">
-                                                        Save Current
-                                                    </button>
-                                                </div>
-                                                {cashChipPresets.length > 0 && (
-                                                    <div className="mt-3 space-y-1.5">
-                                                        {cashChipPresets.map(p => (
-                                                            <div key={p.id} className={`flex items-center justify-between text-xs ${subtextColorClass} ${inputBgClass} rounded-md px-3 py-2`}>
-                                                                <span className="truncate">{p.name}</span>
-                                                                <div className="flex gap-3 shrink-0 ml-2">
-                                                                    <button onClick={() => renameCashChipPreset(p.id)} className="text-blue-400 underline">Rename</button>
-                                                                    <button onClick={() => deleteCashChipPreset(p.id)} className="text-red-400 underline">Delete</button>
-                                                                </div>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                )}
-                                            </div>
-
-                                            {/* Cash Game Smart Chip Builder -- stakes + min/max buy-in drive the
-                                                same knapsack distribution algorithm the Tournament Smart Builder
-                                                uses, just computed once per buy-in level (min/mid/max) so every
-                                                player shares the same small-chip base and only the bigger
-                                                denominations scale up as buy-in increases. */}
-                                            <div className="rounded-xl border border-cyan-400/50 bg-cyan-500/5 p-4">
-                                                <p className="text-xs font-bold text-cyan-300 uppercase tracking-wide mb-3">
-                                                    Enter stakes, buy-in range, and how many of each chip you own
-                                                </p>
-                                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                                                    <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center`}>
-                                                        <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5`}>Small Blind</label>
-                                                        <input
-                                                            type="number"
-                                                            min="0" step="0.01"
-                                                            value={cashSmallBlind}
-                                                            onChange={(e) => setCashSmallBlind(parseFloat(e.target.value) || 0)}
-                                                            className="w-full px-3 py-2 rounded-md bg-gray-900/80 border border-cyan-400/70 text-cyan-200 font-semibold text-lg focus:outline-none focus:ring-2 focus:ring-cyan-400"
-                                                        />
-                                                    </div>
-                                                    <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center`}>
-                                                        <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5`}>Big Blind</label>
-                                                        <input
-                                                            type="number"
-                                                            min="0" step="0.01"
-                                                            value={cashBigBlind}
-                                                            onChange={(e) => setCashBigBlind(parseFloat(e.target.value) || 0)}
-                                                            className="w-full px-3 py-2 rounded-md bg-gray-900/80 border border-cyan-400/70 text-cyan-200 font-semibold text-lg focus:outline-none focus:ring-2 focus:ring-cyan-400"
-                                                        />
-                                                    </div>
-                                                    <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center`}>
-                                                        <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5`}>Number of Players</label>
-                                                        <input
-                                                            type="number"
-                                                            min="1"
-                                                            value={cashPlayers}
-                                                            onChange={(e) => setCashPlayers(Math.max(1, parseInt(e.target.value) || 1))}
-                                                            className="w-full px-3 py-2 rounded-md bg-gray-900/80 border border-cyan-400/70 text-cyan-200 font-semibold text-lg focus:outline-none focus:ring-2 focus:ring-cyan-400"
-                                                        />
-                                                    </div>
-                                                    <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center`}>
-                                                        <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5`}>Chip Distribution Style</label>
-                                                        <select
-                                                            value={cashChipStyle}
-                                                            onChange={(e) => setCashChipStyle(e.target.value)}
-                                                            className="w-full px-2 py-2 rounded-md bg-gray-900/80 border border-cyan-400/70 text-cyan-200 font-semibold text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400"
-                                                        >
-                                                            <option value="easy">Easy (more small chips)</option>
-                                                            <option value="balanced">Balanced mix</option>
-                                                            <option value="aggressive">Aggressive (fewer, bigger chips)</option>
-                                                        </select>
-                                                    </div>
-                                                </div>
-
-                                                <div className="grid grid-cols-2 gap-3 mt-3">
-                                                    <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center`}>
-                                                        <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5`}>Min Buy-in ($)</label>
-                                                        <input
-                                                            type="number"
-                                                            min="0" step="0.01"
-                                                            value={cashMinBuyIn}
-                                                            onChange={(e) => setCashMinBuyIn(parseFloat(e.target.value) || 0)}
-                                                            className="w-full px-3 py-2 rounded-md bg-gray-900/80 border border-cyan-400/70 text-cyan-200 font-semibold text-lg focus:outline-none focus:ring-2 focus:ring-cyan-400"
-                                                            inputMode="decimal"
-                                                        />
-                                                    </div>
-                                                    <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center`}>
-                                                        <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5`}>Max Buy-in ($)</label>
-                                                        <input
-                                                            type="number"
-                                                            min="0" step="0.01"
-                                                            value={cashMaxBuyIn}
-                                                            onChange={(e) => setCashMaxBuyIn(parseFloat(e.target.value) || 0)}
-                                                            className="w-full px-3 py-2 rounded-md bg-gray-900/80 border border-cyan-400/70 text-cyan-200 font-semibold text-lg focus:outline-none focus:ring-2 focus:ring-cyan-400"
-                                                            inputMode="decimal"
-                                                        />
-                                                    </div>
-                                                </div>
-
-                                                {/* Achievable stack summary per buy-in level */}
-                                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
-                                                    <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center`}>
-                                                        <span className={`text-xs font-semibold ${subtextColorClass} mb-1`}>At Min Buy-in</span>
-                                                        {cashDistributions?.min ? (
-                                                            <span className={`text-lg font-bold ${cashDistributions.min.effectiveStack === cashDistributions.min.idealStack ? 'text-green-400' : 'text-yellow-300'}`}>
-                                                                ${cashDistributions.min.effectiveStack.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                                                {cashDistributions.min.effectiveStack !== cashDistributions.min.idealStack && <span className="text-xs font-normal ml-1">(closest)</span>}
-                                                            </span>
-                                                        ) : <span className="text-lg font-bold text-gray-500">—</span>}
-                                                    </div>
-                                                    <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center`}>
-                                                        <span className={`text-xs font-semibold ${subtextColorClass} mb-1`}>At Mid Buy-in</span>
-                                                        {cashDistributions?.mid ? (
-                                                            <span className={`text-lg font-bold ${cashDistributions.mid.effectiveStack === cashDistributions.mid.idealStack ? 'text-green-400' : 'text-yellow-300'}`}>
-                                                                ${cashDistributions.mid.effectiveStack.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                                                {cashDistributions.mid.effectiveStack !== cashDistributions.mid.idealStack && <span className="text-xs font-normal ml-1">(closest)</span>}
-                                                            </span>
-                                                        ) : <span className="text-lg font-bold text-gray-500">—</span>}
-                                                    </div>
-                                                    <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center`}>
-                                                        <span className={`text-xs font-semibold ${subtextColorClass} mb-1`}>At Max Buy-in</span>
-                                                        {cashDistributions?.max ? (
-                                                            <span className={`text-lg font-bold ${cashDistributions.max.effectiveStack === cashDistributions.max.idealStack ? 'text-green-400' : 'text-yellow-300'}`}>
-                                                                ${cashDistributions.max.effectiveStack.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                                                {cashDistributions.max.effectiveStack !== cashDistributions.max.idealStack && <span className="text-xs font-normal ml-1">(closest)</span>}
-                                                            </span>
-                                                        ) : <span className="text-lg font-bold text-gray-500">—</span>}
-                                                    </div>
-                                                </div>
-                                                <p className="text-[11px] text-gray-400 mt-2">
-                                                    Every buy-in level shares the same base of small chips (enough to post {cashSmallBlind > 0 ? `$${cashSmallBlind}/$${cashBigBlind}` : 'the blinds'} a couple times over) -- as buy-in rises from min to max, the extra value is made up with bigger denominations on top.
-                                                </p>
-                                            </div>
-
                                             <div className="space-y-4">
                                                 {chipDenominations.sort((a, b) => a.value - b.value).map(chip => (
-                                                    <div key={chip.id} className={`${sectionBgClass} p-3 rounded-lg shadow-sm space-y-3`}>
-                                                        <div className="flex items-center gap-4">
-                                                            <svg viewBox="0 0 40 40" className="w-9 h-9 shrink-0" style={{ filter: 'drop-shadow(0 2px 3px rgba(0,0,0,0.4))' }}>
-                                                <circle cx="20" cy="20" r="18" fill={chip.color} stroke="#ffffff" strokeWidth="2" />
-                                                <circle cx="20" cy="20" r="18" fill="none" stroke="#000000" strokeOpacity="0.15" strokeWidth="1" />
-                                                <circle cx="20" cy="20" r="13.5" fill="none" stroke="#ffffff" strokeWidth="2.5" strokeDasharray="4.2 4.2" />
-                                                <circle cx="20" cy="20" r="8" fill="#ffffff" fillOpacity="0.92" />
-                                                <circle cx="20" cy="20" r="8" fill="none" stroke={chip.color} strokeWidth="1.5" />
-                                            </svg>
-                                                            <div className="flex items-center gap-2 flex-grow">
-                                                                <label className={`${subtextColorClass} text-sm whitespace-nowrap`}>Color:</label>
-                                                                <select
-                                                                    value={chip.color}
-                                                                    onChange={(e) => updateChipDenomination(chip.id, 'color', e.target.value)}
-                                                                    className={`w-28 px-2 py-1 rounded-md ${inputBgClass} ${inputBorderClass} ${subtextColorClass}`}
-                                                                >
-                                                                    {predefinedColors.map(color => (
-                                                                        <option key={color.hex} value={color.hex} style={{ backgroundColor: color.hex, color: (color.name === 'Black' || color.name === 'Maroon' || color.name === 'Indigo') ? 'white' : 'black' }}>
-                                                                            {color.name}
-                                                                        </option>
-                                                                    ))}
-                                                                </select>
-                                                            </div>
-                                                            <div className="flex items-center gap-2">
-                                                                <label className={`${subtextColorClass} text-sm whitespace-nowrap`}>Value:</label>
-                                                                <input
-                                                                    type="text" // Changed to type="text" to allow decimals more easily
-                                                                    value={chip.value}
-                                                                    onChange={(e) => updateChipDenomination(chip.id, 'value', e.target.value)}
-                                                                    min="0.01" step="any" // Min set to 0.01, step to any for decimals
-                                                                    className={`w-24 px-2 py-1 rounded-md ${inputBgClass} ${inputBorderClass} ${subtextColorClass}`}
-                                                                    inputMode="decimal" // Suggests decimal keyboard on mobile
-                                                                />
-                                                            </div>
-                                                            <div className="flex items-center gap-2">
-                                                                <label className={`${subtextColorClass} text-sm whitespace-nowrap`}>Owned:</label>
-                                                                <input
-                                                                    type="number"
-                                                                    min="0" step="1"
-                                                                    value={chip.quantity ?? 0}
-                                                                    onChange={(e) => updateChipDenomination(chip.id, 'quantity', e.target.value)}
-                                                                    className={`w-20 px-2 py-1 rounded-md ${inputBgClass} ${inputBorderClass} ${subtextColorClass}`}
-                                                                    inputMode="numeric"
-                                                                />
-                                                            </div>
-                                                            <button
-                                                                onClick={() => deleteChipDenomination(chip.id)}
-                                                                className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
+                                                    <div key={chip.id} className={`${sectionBgClass} p-3 rounded-lg shadow-sm flex items-center gap-4`}>
+                                                        <svg viewBox="0 0 40 40" className="w-9 h-9 shrink-0" style={{ filter: 'drop-shadow(0 2px 3px rgba(0,0,0,0.4))' }}>
+                                            <circle cx="20" cy="20" r="18" fill={chip.color} stroke="#ffffff" strokeWidth="2" />
+                                            <circle cx="20" cy="20" r="18" fill="none" stroke="#000000" strokeOpacity="0.15" strokeWidth="1" />
+                                            <circle cx="20" cy="20" r="13.5" fill="none" stroke="#ffffff" strokeWidth="2.5" strokeDasharray="4.2 4.2" />
+                                            <circle cx="20" cy="20" r="8" fill="#ffffff" fillOpacity="0.92" />
+                                            <circle cx="20" cy="20" r="8" fill="none" stroke={chip.color} strokeWidth="1.5" />
+                                        </svg>
+                                                        <div className="flex items-center gap-2 flex-grow">
+                                                            <label className={`${subtextColorClass} text-sm whitespace-nowrap`}>Color:</label>
+                                                            {/* Replaced text input with select dropdown for colors */}
+                                                            <select
+                                                                value={chip.color}
+                                                                onChange={(e) => updateChipDenomination(chip.id, 'color', e.target.value)}
+                                                                className={`w-28 px-2 py-1 rounded-md ${inputBgClass} ${inputBorderClass} ${subtextColorClass}`}
                                                             >
-                                                                Remove
-                                                            </button>
+                                                                {predefinedColors.map(color => (
+                                                                    <option key={color.hex} value={color.hex} style={{ backgroundColor: color.hex, color: (color.name === 'Black' || color.name === 'Maroon' || color.name === 'Indigo') ? 'white' : 'black' }}>
+                                                                        {color.name}
+                                                                    </option>
+                                                                ))}
+                                                            </select>
                                                         </div>
-                                                        {cashDistributions && (cashDistributions.min || cashDistributions.mid || cashDistributions.max) && (
-                                                            <div className="flex flex-wrap gap-2 pt-1 border-t border-white/5">
-                                                                {cashDistributions.min && (
-                                                                    <span className="inline-flex items-center justify-center px-3 py-1 rounded-full bg-cyan-600/20 border border-cyan-500/40 text-xs font-semibold text-cyan-300">
-                                                                        Min: {getCashPerPlayerCountForChip(cashDistributions.min, chip.id)}/player
-                                                                    </span>
-                                                                )}
-                                                                {cashDistributions.mid && (
-                                                                    <span className="inline-flex items-center justify-center px-3 py-1 rounded-full bg-cyan-600/20 border border-cyan-500/40 text-xs font-semibold text-cyan-300">
-                                                                        Mid: {getCashPerPlayerCountForChip(cashDistributions.mid, chip.id)}/player
-                                                                    </span>
-                                                                )}
-                                                                {cashDistributions.max && (
-                                                                    <span className="inline-flex items-center justify-center px-3 py-1 rounded-full bg-cyan-600/20 border border-cyan-500/40 text-xs font-semibold text-cyan-300">
-                                                                        Max: {getCashPerPlayerCountForChip(cashDistributions.max, chip.id)}/player
-                                                                    </span>
-                                                                )}
-                                                            </div>
-                                                        )}
+                                                        <div className="flex items-center gap-2">
+                                                            <label className={`${subtextColorClass} text-sm whitespace-nowrap`}>Value:</label>
+                                                            <input
+                                                                type="text" // Changed to type="text" to allow decimals more easily
+                                                                value={chip.value}
+                                                                onChange={(e) => updateChipDenomination(chip.id, 'value', e.target.value)}
+                                                                min="0.01" step="any" // Min set to 0.01, step to any for decimals
+                                                                className={`w-24 px-2 py-1 rounded-md ${inputBgClass} ${inputBorderClass} ${subtextColorClass}`}
+                                                                inputMode="decimal" // Suggests decimal keyboard on mobile
+                                                            />
+                                                        </div>
+                                                        <button
+                                                            onClick={() => deleteChipDenomination(chip.id)}
+                                                            className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
+                                                        >
+                                                            Remove
+                                                        </button>
                                                     </div>
                                                 ))}
                                             </div>
@@ -6736,7 +6436,7 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                             <button
                                                 onClick={handleAddHighHandCard}
                                                 disabled={!highHandSelectedRank || !highHandSelectedSuit || currentHandSelection.includes(`${highHandSelectedRank}${highHandSelectedSuit}`) || currentHandSelection.length >= 5}
-                                                className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md disabled:opacity-50 disabled:cursor-not-allowed mt-4"
+                                                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shadow-md disabled:opacity-50 disabled:cursor-not-allowed mt-4"
                                             >
                                                 Add Card
                                             </button>
@@ -6759,7 +6459,7 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                         <button onClick={addHand} disabled={currentHandSelection.length !== 5} className="px-5 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg shadow-md disabled:opacity-50 disabled:cursor-not-allowed">
                                             Add Hand
                                         </button>
-                                        <button onClick={handleClearHighHandSelection} className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md">
+                                        <button onClick={handleClearHighHandSelection} className="px-5 py-2 bg-yellow-600 hover:bg-yellow-700 text-white font-semibold rounded-lg shadow-md">
                                             Clear Selection
                                         </button>
                                         <button onClick={() => setShowAddManageHands(false)} className="px-5 py-2 bg-gray-500 hover:bg-gray-600 text-white font-semibold rounded-lg shadow-md">
@@ -6773,7 +6473,7 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                     <div className="flex justify-center mb-6">
                                         <button
                                             onClick={handleClearCurrentHighHandDisplay}
-                                            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
+                                            className="px-6 py-3 bg-orange-600 hover:bg-orange-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
                                         >
                                             Clear Current High Hand Display
                                         </button>
@@ -6894,7 +6594,7 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                             <button
                                                 onClick={handleAddBadBeatCard}
                                                 disabled={!badBeatSelectedRank || !badBeatSelectedSuit || tempBadBeatSelection.includes(`${badBeatSelectedRank}${badBeatSelectedSuit}`) || tempBadBeatSelection.length >= 5}
-                                                className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md disabled:opacity-50 disabled:cursor-not-allowed mt-4"
+                                                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shadow-md disabled:opacity-50 disabled:cursor-not-allowed mt-4"
                                             >
                                                 Add Card
                                             </button>
@@ -6937,6 +6637,8 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
   }, [uiScale]);
   const [theme, setTheme] = useState('dark');
   const [authUser, setAuthUser] = useState(() => window.__currentUser);
+  const [userTier, setUserTier] = useState(() => window.__userTier);
+  const [isAdmin, setIsAdmin] = useState(() => window.__isAdmin);
 
   const goToView = (view) => {
     setCurrentView(view);
@@ -6944,9 +6646,17 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
   };
 
   useEffect(() => {
-    const unsubscribe = window.__firebaseAuth.onAuthStateChanged((user) => {
+    const unsubscribe = window.__firebaseAuth.onAuthStateChanged(async (user) => {
       window.__currentUser = user;
       setAuthUser(user);
+      if (user) {
+        await window.__resolveUserTier(user);
+        setUserTier(window.__userTier);
+        setIsAdmin(window.__isAdmin);
+      } else {
+        setUserTier(null);
+        setIsAdmin(false);
+      }
     });
     return unsubscribe;
   }, []);
@@ -7046,13 +6756,13 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
 
   return (
     <>
-      <AuthWidget user={authUser} theme={theme} hidden={currentView === 'tracking'} />
+      <AuthWidget user={authUser} theme={theme} hidden={currentView === 'tracking'} isAdmin={isAdmin} onGoToAdmin={() => goToView('admin')} />
       <div
         className={`zoom-scale-container min-h-screen flex flex-col items-center font-inter transition-colors duration-500 ${appBgClass} p-4`}
         style={{
           zoom: uiScale,
           minHeight: '100dvh',
-          display: (currentView === 'invites' || currentView === 'tracking') ? 'none' : 'flex'
+          display: (currentView === 'invites' || currentView === 'tracking' || currentView === 'admin') ? 'none' : 'flex'
         }}
       >
 
@@ -7144,6 +6854,21 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
             isActive={currentView === 'invites'}
             onBackToHome={() => goToView('home')}
           />
+        </div>
+      )}
+
+      {visitedViews.has('admin') && (
+        <div className={currentView === 'admin' ? '' : 'hidden'}>
+          {isAdmin ? (
+            <AdminView onBackToHome={() => goToView('home')} />
+          ) : (
+            <div className="min-h-screen flex flex-col items-center justify-center bg-gray-900 text-white p-4">
+              <p className="mb-4">You don't have access to this page.</p>
+              <button onClick={() => goToView('home')} className="px-6 py-3 bg-gray-600 hover:bg-gray-700 rounded-lg font-semibold">
+                &larr; Home
+              </button>
+            </div>
+          )}
         </div>
       )}
 
