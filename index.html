@@ -1870,15 +1870,15 @@
                 house: {
                     title: 'The House',
                     options: [
-                        { mode: 'tracking', label: 'Logbook', color: 'bg-purple-600 hover:bg-purple-700' },
-                        { mode: 'invites', label: 'Invites', color: 'bg-pink-600 hover:bg-pink-700' },
+                        { mode: 'tracking', label: 'Logbook', color: 'bg-blue-600 hover:bg-blue-700' },
+                        { mode: 'invites', label: 'Invites', color: 'bg-blue-600 hover:bg-blue-700' },
                     ]
                 },
                 edge: {
                     title: 'The Edge',
                     options: [
                         { mode: 'highHand', label: 'Cash Game', color: 'bg-blue-600 hover:bg-blue-700' },
-                        { mode: 'tournament', label: 'Tournament', color: 'bg-green-600 hover:bg-green-700' },
+                        { mode: 'tournament', label: 'Tournament', color: 'bg-blue-600 hover:bg-blue-700' },
                     ]
                 }
             };
@@ -1903,13 +1903,13 @@
                     <div className="flex flex-col space-y-6 w-full max-w-sm">
                         <button
                             onClick={() => setActiveGroup('edge')}
-                            className="w-full px-8 py-4 bg-blue-700 hover:bg-blue-800 text-white font-semibold text-2xl rounded-lg shadow-lg transition-all duration-200 transform hover:scale-105"
+                            className="w-full px-8 py-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-2xl rounded-lg shadow-lg transition-all duration-200 transform hover:scale-105"
                         >
                             The Edge
                         </button>
                         <button
                             onClick={() => setActiveGroup('house')}
-                            className="w-full px-8 py-4 bg-purple-700 hover:bg-purple-800 text-white font-semibold text-2xl rounded-lg shadow-lg transition-all duration-200 transform hover:scale-105"
+                            className="w-full px-8 py-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-2xl rounded-lg shadow-lg transition-all duration-200 transform hover:scale-105"
                         >
                             The House
                         </button>
@@ -3737,19 +3737,19 @@ const getPerPlayerCountForChip = (chipId) => {
                                         </button>
                                         <button
                                             onClick={() => setTournamentSettingsSubView('payouts')}
-                                            className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
+                                            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
                                         >
                                             Payout Settings
                                         </button>
                                         <button
                                             onClick={() => setTournamentSettingsSubView('chipSettings')}
-                                            className="px-6 py-3 bg-cyan-600 hover:bg-cyan-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
+                                            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
                                         >
                                             Chip and Stack Settings
                                         </button>
                                         <button
                                             onClick={() => setTournamentSettingsSubView('visual')}
-                                            className="px-6 py-3 bg-teal-600 hover:bg-teal-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
+                                            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
                                         >
                                             Visual Settings
                                         </button>
@@ -4009,7 +4009,7 @@ const getPerPlayerCountForChip = (chipId) => {
                                             </button>
                                             <button
 											  onClick={() => setPendingBreakAfterIndex(0)}
-											  className="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
+											  className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
 											>
 											  Add Break
 											</button>
@@ -4055,7 +4055,7 @@ const getPerPlayerCountForChip = (chipId) => {
         });
         setPendingBreakAfterIndex(null);
       }}
-      className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold rounded-lg shadow-md transition-all duration-200"
+      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-md transition-all duration-200"
     >
       Insert Break
     </button>
@@ -4331,7 +4331,7 @@ const getPerPlayerCountForChip = (chipId) => {
 										  </button>
 										  <button
 											onClick={clearPayoutCounts}
-											className="px-6 py-3 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
+											className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
 										  >
 											Clear Counts
 										  </button>
@@ -5912,16 +5912,16 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                             </div>
                                         </div>
                                         <div className="flex flex-col space-y-4">
-                                            <button onClick={() => setHighHandSettingsSubView('visual')} className="px-6 py-3 bg-teal-600 hover:bg-teal-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200">
+                                            <button onClick={() => setHighHandSettingsSubView('visual')} className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200">
 										  Visual Settings
 									</button>
-										<button onClick={() => setHighHandSettingsSubView('jackpot')} className="px-6 py-3 bg-orange-600 hover:bg-orange-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200">
+										<button onClick={() => setHighHandSettingsSubView('jackpot')} className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200">
 										  Bad Beat Jackpot
 										</button>
-										<button onClick={() => setHighHandSettingsSubView('additionalGames')} className="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200">
+										<button onClick={() => setHighHandSettingsSubView('additionalGames')} className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200">
 										  Additional Games
 										</button>
-										<button onClick={() => setHighHandSettingsSubView('chipSettings')} className="px-6 py-3 bg-cyan-600 hover:bg-cyan-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200">
+										<button onClick={() => setHighHandSettingsSubView('chipSettings')} className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200">
 										  Chip Denominations
 										</button>
 										<div className="flex justify-end mt-8">
@@ -6736,7 +6736,7 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                             <button
                                                 onClick={handleAddHighHandCard}
                                                 disabled={!highHandSelectedRank || !highHandSelectedSuit || currentHandSelection.includes(`${highHandSelectedRank}${highHandSelectedSuit}`) || currentHandSelection.length >= 5}
-                                                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shadow-md disabled:opacity-50 disabled:cursor-not-allowed mt-4"
+                                                className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md disabled:opacity-50 disabled:cursor-not-allowed mt-4"
                                             >
                                                 Add Card
                                             </button>
@@ -6759,7 +6759,7 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                         <button onClick={addHand} disabled={currentHandSelection.length !== 5} className="px-5 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg shadow-md disabled:opacity-50 disabled:cursor-not-allowed">
                                             Add Hand
                                         </button>
-                                        <button onClick={handleClearHighHandSelection} className="px-5 py-2 bg-yellow-600 hover:bg-yellow-700 text-white font-semibold rounded-lg shadow-md">
+                                        <button onClick={handleClearHighHandSelection} className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md">
                                             Clear Selection
                                         </button>
                                         <button onClick={() => setShowAddManageHands(false)} className="px-5 py-2 bg-gray-500 hover:bg-gray-600 text-white font-semibold rounded-lg shadow-md">
@@ -6773,7 +6773,7 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                     <div className="flex justify-center mb-6">
                                         <button
                                             onClick={handleClearCurrentHighHandDisplay}
-                                            className="px-6 py-3 bg-orange-600 hover:bg-orange-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
+                                            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
                                         >
                                             Clear Current High Hand Display
                                         </button>
@@ -6894,7 +6894,7 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                             <button
                                                 onClick={handleAddBadBeatCard}
                                                 disabled={!badBeatSelectedRank || !badBeatSelectedSuit || tempBadBeatSelection.includes(`${badBeatSelectedRank}${badBeatSelectedSuit}`) || tempBadBeatSelection.length >= 5}
-                                                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shadow-md disabled:opacity-50 disabled:cursor-not-allowed mt-4"
+                                                className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md disabled:opacity-50 disabled:cursor-not-allowed mt-4"
                                             >
                                                 Add Card
                                             </button>
