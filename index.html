@@ -685,59 +685,57 @@
          * @param {boolean} [props.isLarge=false] - If true, renders the card in a larger size.
          */
         const CardDisplay = ({ cardString, isLarge = false }) => {
+            const [imgFailed, setImgFailed] = useState(false);
+
             // Validate the input card string length
             if (!cardString || cardString.length < 2 || cardString.length > 3) {
                 return <span className="text-red-500">Invalid Card</span>;
             }
 
             // Extract rank and suit from the card string
-            let rank = cardString.slice(0, -1); // All characters except the last one
-            const suitChar = cardString.slice(-1).toLowerCase(); // Last character, converted to lowercase
+            const rank = cardString.slice(0, -1).toUpperCase();
+            const suitChar = cardString.slice(-1).toUpperCase();
+            const validSuits = ['S', 'H', 'D', 'C'];
 
-            let suitSymbol;     // Symbol for the suit (♠, ♥, ♦, ♣)
-            let textColorClass; // Tailwind CSS class for text color
-            const cardBgClass = 'bg-white'; // Background color for the card
-
-            // Determine suit symbol and color based on the suit character
-            switch (suitChar) {
-                // Modified: Use actual suit characters and apply red color for hearts and diamonds
-                case 's': suitSymbol = '♠'; textColorClass = 'text-gray-900'; break; // Spades (black)
-                case 'h': suitSymbol = '♥'; textColorClass = 'text-red-500'; break; // Hearts (red)
-                case 'd': suitSymbol = '♦'; textColorClass = 'text-red-500'; break; // Diamonds (red)
-                case 'c': suitSymbol = '♣'; textColorClass = 'text-gray-900'; break; // Clubs (black)
-                default:  suitSymbol = '?'; textColorClass = 'text-gray-400'; // Fallback for invalid suit
+            if (!validSuits.includes(suitChar) || !rank) {
+                return <span className="text-red-500">Invalid Card</span>;
             }
 
-            // Standardize rank display (e.e.g., 'T' to '10', 'A' to 'A')
-            switch (rank.toUpperCase()) {
-                case 'T': rank = '10'; break; // 'T' for Ten
-                case 'J': rank = 'J'; break; // Jack
-                case 'Q': rank = 'Q'; break; // Queen
-                case 'K': rank = 'K'; break; // King
-                case 'A': rank = 'A'; break; // Ace
-                default:
-                    // Handle '10' as 'T' or numeric ranks '2'-'9'
-                    if (rank.length === 2 && rank.startsWith('1')) {
-                        rank = '10'; // Ensure '10' is correctly displayed
-                    } else if (rank.length === 1 && !isNaN(parseInt(rank))) {
-                        rank = rank; // Numeric ranks (2-9)
-                    } else {
-                        rank = '?'; // Fallback for invalid rank
-                    }
-            }
+            const displayRank = (rank === 'T' || rank === '10') ? '10' : rank;
+            // deckofcardsapi.com uses "0" for Ten instead of "T"/"10".
+            const apiRank = (rank === 'T' || rank === '10') ? '0' : rank;
+            const imgSrc = `https://deckofcardsapi.com/static/img/${apiRank}${suitChar}.png`;
 
-            // Base Tailwind CSS classes for card styling
-            const baseClasses = `inline-flex items-center justify-center ${cardBgClass} rounded-md shadow-lg my-0.5 border border-gray-300 ${textColorClass} flex-shrink-0`;
-            // Size-specific Tailwind CSS classes based on `isLarge` prop
             const sizeClasses = isLarge
-                ? 'text-3xl px-1 py-2 w-[60px] h-[85px]' // Larger size for main display
-                : 'text-base px-2 py-1 w-[40px] h-[60px]'; // Smaller size for input/list display
+                ? 'w-[64px] h-[90px] sm:w-[76px] sm:h-[106px]'
+                : 'w-[42px] h-[59px]';
+
+            if (imgFailed) {
+                // Fallback to a simple text-based card if the real card image can't
+                // load (e.g. no internet at the venue) -- still fully functional,
+                // just less fancy.
+                let suitSymbol, textColorClass;
+                switch (suitChar) {
+                    case 'S': suitSymbol = '♠'; textColorClass = 'text-gray-900'; break;
+                    case 'H': suitSymbol = '♥'; textColorClass = 'text-red-500'; break;
+                    case 'D': suitSymbol = '♦'; textColorClass = 'text-red-500'; break;
+                    case 'C': suitSymbol = '♣'; textColorClass = 'text-gray-900'; break;
+                }
+                return (
+                    <span className={`inline-flex flex-col items-center justify-center bg-white rounded-md shadow-lg my-0.5 border border-gray-300 ${textColorClass} flex-shrink-0 ${sizeClasses} font-bold`}>
+                        <span className={isLarge ? 'text-2xl' : 'text-base'}>{displayRank}</span>
+                        <span className={isLarge ? 'text-xl' : 'text-lg'}>{suitSymbol}</span>
+                    </span>
+                );
+            }
 
             return (
-                <span className={`${baseClasses} ${sizeClasses}`}>
-                    <span className="font-bold">{rank}</span>
-                    <span className={`ml-0.5 ${isLarge ? 'text-xl' : 'text-lg'}`}>{suitSymbol}</span>
-                </span>
+                <img
+                    src={imgSrc}
+                    alt={`${displayRank} of ${suitChar}`}
+                    className={`${sizeClasses} rounded-md shadow-lg my-0.5 flex-shrink-0 object-contain bg-white`}
+                    onError={() => setImgFailed(true)}
+                />
             );
         };
 
