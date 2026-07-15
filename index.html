@@ -880,14 +880,42 @@
             const topSpacer = PADDING + startIndex * ITEM_HEIGHT;
             const bottomSpacer = PADDING + (values.length - 1 - endIndex) * ITEM_HEIGHT;
 
+            // The highlighted item updates live on every scroll tick (cheap local
+            // state, no parent re-render). The actual onChange commit to parent
+            // state is debounced until scrolling settles. Committing on every
+            // tick was fighting the browser's own momentum scrolling during a
+            // fast swipe -- each commit changed `value`, which the scrollTop-sync
+            // effect below would react to by force-correcting scrollTop, right in
+            // the middle of the browser's own scroll animation. That fight is
+            // what caused the value to visibly jump back and forth before
+            // finally settling.
+            const [liveValue, setLiveValue] = useState(value);
+            const commitTimeoutRef = useRef(null);
+
+            useEffect(() => {
+                setLiveValue(value);
+            }, [value]);
+
+            useEffect(() => () => clearTimeout(commitTimeoutRef.current), []);
+
             const handleScroll = () => {
                 if (!wheelRef.current) return;
                 const newScrollTop = wheelRef.current.scrollTop;
                 setScrollTop(newScrollTop);
+
                 const index = Math.round(newScrollTop / ITEM_HEIGHT);
                 const clamped = Math.max(0, Math.min(values.length - 1, index));
-                const newValue = values[clamped];
-                if (newValue !== undefined && newValue !== value) onChange(newValue);
+                const nearestValue = values[clamped];
+                if (nearestValue !== undefined && nearestValue !== liveValue) {
+                    setLiveValue(nearestValue);
+                }
+
+                clearTimeout(commitTimeoutRef.current);
+                commitTimeoutRef.current = setTimeout(() => {
+                    if (nearestValue !== undefined && nearestValue !== value) {
+                        onChange(nearestValue);
+                    }
+                }, 130);
             };
 
             useEffect(() => {
@@ -932,7 +960,7 @@
                             {visibleValues.map(v => (
                                 <div
                                     key={v}
-                                    className={`flex items-center justify-center font-bold transition-all ${v === value ? 'text-yellow-300 text-base' : 'text-gray-500 text-sm'}`}
+                                    className={`flex items-center justify-center font-bold transition-all ${v === liveValue ? 'text-yellow-300 text-base' : 'text-gray-500 text-sm'}`}
                                     style={{ height: ITEM_HEIGHT, scrollSnapAlign: 'center' }}
                                 >
                                     {formatValue ? formatValue(v) : v}
@@ -4905,8 +4933,8 @@ const getPerPlayerCountForChip = (chipId) => {
                                                                         );
                                                                     }}
                                                                     min={0}
-                                                                    max={999}
-                                                                    step={1}
+                                                                    max={2000}
+                                                                    step={20}
                                                                     width="4.5rem"
                                                                 />
                                                             </div>
@@ -6645,14 +6673,12 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
       </div>
       <div className="flex items-center justify-between pl-4">
         <span className={`${subtextColorClass} text-sm`}>Bounty amount ($):</span>
-        <input
-          type="number"
-          min="0"
-          step="1"
-          value={sevenDeuceBounty}
-          onChange={(e) => setSevenDeuceBounty(e.target.value)}
-          className={`w-24 px-2 py-1 rounded-md ${inputBgClass} ${inputBorderClass} ${subtextColorClass}`}
-          placeholder="0"
+        <WheelPicker
+          value={parseFloat(sevenDeuceBounty) || 0}
+          onChange={setSevenDeuceBounty}
+          min={0} max={2000} step={1}
+          formatValue={(v) => `$${v}`}
+          width="5rem"
         />
       </div>
     </div>
@@ -6680,14 +6706,12 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
       </div>
       <div className="flex items-center justify-between pl-4">
         <span className={`${subtextColorClass} text-sm`}>Bounty amount ($):</span>
-        <input
-          type="number"
-          min="0"
-          step="1"
-          value={nitGameBounty}
-          onChange={(e) => setNitGameBounty(e.target.value)}
-          className={`w-24 px-2 py-1 rounded-md ${inputBgClass} ${inputBorderClass} ${subtextColorClass}`}
-          placeholder="0"
+        <WheelPicker
+          value={parseFloat(nitGameBounty) || 0}
+          onChange={setNitGameBounty}
+          min={0} max={2000} step={1}
+          formatValue={(v) => `$${v}`}
+          width="5rem"
         />
       </div>
     </div>
@@ -6715,14 +6739,12 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
       </div>
       <div className="flex items-center justify-between pl-4">
         <span className={`${subtextColorClass} text-sm`}>Bounty amount ($):</span>
-        <input
-          type="number"
-          min="0"
-          step="1"
-          value={squidGameBounty}
-          onChange={(e) => setSquidGameBounty(e.target.value)}
-          className={`w-24 px-2 py-1 rounded-md ${inputBgClass} ${inputBorderClass} ${subtextColorClass}`}
-          placeholder="0"
+        <WheelPicker
+          value={parseFloat(squidGameBounty) || 0}
+          onChange={setSquidGameBounty}
+          min={0} max={2000} step={1}
+          formatValue={(v) => `$${v}`}
+          width="5rem"
         />
       </div>
     </div>
@@ -6970,8 +6992,8 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                                                     value={chip.quantity ?? 0}
                                                                     onChange={(v) => updateChipDenomination(chip.id, 'quantity', v)}
                                                                     min={0}
-                                                                    max={999}
-                                                                    step={1}
+                                                                    max={2000}
+                                                                    step={20}
                                                                     width="4.5rem"
                                                                 />
                                                             </div>
