@@ -3238,7 +3238,6 @@ stack = Math.round(stack / roundingUnit) * roundingUnit;
             const loadChipPreset = (presetId) => {
                 const preset = chipPresets.find(p => p.id === presetId);
                 if (!preset) return;
-                if (chipDenominations.length > 0 && !confirm(`Load "${preset.name}"? This replaces your current chip set.`)) return;
                 setChipDenominations(preset.denominations.map(d => ({
                     id: crypto.randomUUID(),
                     value: d.value,
@@ -5369,7 +5368,6 @@ const getPerPlayerCountForChip = (chipId) => {
             const loadCashChipPreset = (presetId) => {
                 const preset = cashChipPresets.find(p => p.id === presetId);
                 if (!preset) return;
-                if (chipDenominations.length > 0 && !confirm(`Load "${preset.name}"? This replaces your current chip set.`)) return;
                 setChipDenominations(preset.denominations.map(d => ({
                     id: crypto.randomUUID(),
                     value: d.value,
@@ -6120,7 +6118,7 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
       <p className={`${subtextColorClass} text-sm font-medium`}>
         7 Deuce Game is <span className="font-semibold text-m text-yellow-400">ON</span>
       </p>
-      {sevenDeuceBounty !== '' && (
+      {Number(sevenDeuceBounty) > 0 && (
         <p className={`${subtextColorClass} text-xs`}>
           Bounty: <span className="font-semibold text-m text-green-400">${Number(sevenDeuceBounty).toLocaleString()}</span>
         </p>
@@ -6135,7 +6133,7 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
 	  <p className={`${subtextColorClass} text-sm font-medium`}>
         Nit Game is <span className="font-semibold text-m text-yellow-400">ON</span>
 		</p>
-        {nitGameBounty !== '' && (
+        {Number(nitGameBounty) > 0 && (
           <p className={`${subtextColorClass} text-xs`}>
             Bounty: <span className="font-semibold text-m text-green-400">${Number(nitGameBounty).toLocaleString()}</span>
           </p>
@@ -6150,7 +6148,7 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
         <p className={`${subtextColorClass} text-sm font-medium`}>
 		Squid Game is <span className="font-semibold text-m text-yellow-400">ON</span>
 		</p>
-        {squidGameBounty !== '' && (
+        {Number(squidGameBounty) > 0 && (
           <p className={`${subtextColorClass} text-xs`}>
             Bounty: <span className="font-semibold text-m text-green-400">${Number(squidGameBounty).toLocaleString()}</span>
           </p>
@@ -6769,12 +6767,6 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
 
 
 {/* Chip Denominations - existing code continues */}
-{highHandSettingsSubView === 'chipSettings' && (
-    <>
-        {/* your existing chip settings content */}
-    </>
-)}
-
                                 {/* Chip Denominations Settings View */}
                                 {highHandSettingsSubView === 'chipSettings' && (
                                     <>
