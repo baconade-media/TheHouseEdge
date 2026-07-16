@@ -1023,6 +1023,11 @@
                         isProgrammaticScroll.current = true;
                         wheelRef.current.scrollTop = target;
                         setScrollTop(target);
+                        // Safety net: if the scroll event this assignment should
+                        // trigger doesn't actually fire for any reason, don't
+                        // leave the flag stuck true forever -- that would cause
+                        // the wheel to silently ignore the next real user scroll.
+                        setTimeout(() => { isProgrammaticScroll.current = false; }, 60);
                     }
                 }
                 // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -3279,6 +3284,21 @@ stack = Math.round(stack / roundingUnit) * roundingUnit;
 			  if (!window.confirm('Clear ALL payout places?')) return;
 			  setPayoutStructure([]);
 			};
+            // Self-heal: payoutStructure saved before a percentage-normalization
+            // bug fix could be stuck not summing to 100% (deploying a fix
+            // doesn't retroactively repair already-saved data). Silently
+            // re-normalize once on mount if needed, rather than requiring the
+            // user to notice and manually clear/re-add their payout structure.
+            useEffect(() => {
+                setPayoutStructure(prev => {
+                    if (prev.length === 0) return prev;
+                    const total = prev.reduce((sum, p) => sum + (p.percentage || 0), 0);
+                    if (total === 100) return prev;
+                    return normalizePayouts(prev, null);
+                });
+                // eslint-disable-next-line react-hooks/exhaustive-deps
+            }, []);
+
 
 
             // Chip Denomination handlers (for Tournament Mode)
