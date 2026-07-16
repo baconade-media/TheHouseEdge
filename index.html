@@ -276,7 +276,7 @@
     <!-- Your React Application Components (transpiled by Babel) -->
     <script type="text/babel">
         // Destructure useState, useEffect, useRef, useMemo from React global object
-        const { useState, useEffect, useRef, useMemo } = React;
+        const { useState, useEffect, useRef, useMemo, useLayoutEffect } = React;
 
         /**
          * AuthWidget Component
@@ -892,7 +892,7 @@
             const [liveValue, setLiveValue] = useState(value);
             const commitTimeoutRef = useRef(null);
 
-            useEffect(() => {
+            useLayoutEffect(() => {
                 setLiveValue(value);
             }, [value]);
 
@@ -936,7 +936,7 @@
                 }, 130);
             };
 
-            useEffect(() => {
+            useLayoutEffect(() => {
                 if (!wheelRef.current) return;
                 const index = values.findIndex(v => v === clampToValues(value));
                 if (index >= 0) {
