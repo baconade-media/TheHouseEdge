@@ -288,11 +288,18 @@
         // between Free and Pro. Firestore rules restrict both the read (listing
         // everyone) and the tier-change write to accounts flagged isAdmin.
         const AdminView = ({ onBackToHome }) => {
+            const [adminTab, setAdminTab] = useState('members'); // 'members' | 'messages'
             const [members, setMembers] = useState(null);
             const [error, setError] = useState('');
             const [busyId, setBusyId] = useState(null);
             const [tierFilter, setTierFilter] = useState('all'); // 'all' | 'free' | 'pro' | 'trial'
             const [sortOrder, setSortOrder] = useState('newest'); // 'newest' | 'oldest'
+
+            const [messages, setMessages] = useState(null);
+            const [messagesError, setMessagesError] = useState('');
+            const [messageBusyId, setMessageBusyId] = useState(null);
+            const [replyDrafts, setReplyDrafts] = useState({}); // messageId -> draft text
+            const [openReplyId, setOpenReplyId] = useState(null);
 
             const loadMembers = async () => {
                 setError('');
@@ -307,7 +314,69 @@
                 }
             };
 
-            useEffect(() => { loadMembers(); }, []);
+            const loadMessages = async () => {
+                setMessagesError('');
+                try {
+                    const snapshot = await window.__firebaseDb.collection('supportMessages').get();
+                    const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+                    list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+                    setMessages(list);
+                } catch (e) {
+                    console.error('Could not load messages:', e);
+                    setMessagesError("Couldn't load messages -- check that the Firestore admin rules are published.");
+                }
+            };
+
+            useEffect(() => { loadMembers(); loadMessages(); }, []);
+
+            const toggleMessageRead = async (msg) => {
+                setMessageBusyId(msg.id);
+                try {
+                    await window.__firebaseDb.collection('supportMessages').doc(msg.id).set({ read: !msg.read }, { merge: true });
+                    setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, read: !msg.read } : m));
+                } catch (e) {
+                    console.error('Could not update message:', e);
+                    alert("Couldn't update that message.");
+                } finally {
+                    setMessageBusyId(null);
+                }
+            };
+
+            const deleteMessage = async (msg) => {
+                if (!confirm('Delete this message? This can\'t be undone.')) return;
+                setMessageBusyId(msg.id);
+                try {
+                    await window.__firebaseDb.collection('supportMessages').doc(msg.id).delete();
+                    setMessages(prev => prev.filter(m => m.id !== msg.id));
+                } catch (e) {
+                    console.error('Could not delete message:', e);
+                    alert("Couldn't delete that message.");
+                } finally {
+                    setMessageBusyId(null);
+                }
+            };
+
+            const sendReply = async (msg) => {
+                const replyText = (replyDrafts[msg.id] || '').trim();
+                if (!replyText) return;
+                setMessageBusyId(msg.id);
+                try {
+                    await window.__firebaseDb.collection('supportMessages').doc(msg.id).set({
+                        reply: replyText,
+                        repliedAt: Date.now(),
+                        replySeen: false, // the sender hasn't seen this reply yet
+                        read: true, // replying implies you've read the original
+                    }, { merge: true });
+                    setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, reply: replyText, repliedAt: Date.now(), replySeen: false, read: true } : m));
+                    setReplyDrafts(prev => ({ ...prev, [msg.id]: '' }));
+                    setOpenReplyId(null);
+                } catch (e) {
+                    console.error('Could not send reply:', e);
+                    alert("Couldn't send your reply -- please try again.");
+                } finally {
+                    setMessageBusyId(null);
+                }
+            };
 
             const toggleTier = async (member) => {
                 const newTier = member.tier === 'pro' ? 'free' : 'pro';
@@ -340,6 +409,7 @@
             const proCount = members ? members.filter(m => m.tier === 'pro').length : 0;
             const freeCount = members ? members.filter(m => m.tier !== 'pro').length : 0;
             const trialCount = members ? members.filter(m => m.trialEndsAt && m.trialEndsAt > Date.now()).length : 0;
+            const unreadCount = messages ? messages.filter(m => !m.read).length : 0;
 
             const visibleMembers = members
                 ? members
@@ -366,6 +436,29 @@
                     </button>
                     <div className="bg-gray-800 p-5 sm:p-6 rounded-2xl shadow-2xl w-[92vw] max-w-[900px] mt-16 mb-8" style={{ margin: 'auto' }}>
                         <h2 className="text-3xl font-black text-center mb-1 text-blue-400">Admin Dashboard</h2>
+
+                        <div className="flex gap-2 justify-center mb-4">
+                            <button
+                                onClick={() => setAdminTab('members')}
+                                className={`px-4 py-2 rounded-lg text-sm font-semibold ${adminTab === 'members' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+                            >
+                                👤 Members
+                            </button>
+                            <button
+                                onClick={() => setAdminTab('messages')}
+                                className={`px-4 py-2 rounded-lg text-sm font-semibold relative ${adminTab === 'messages' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+                            >
+                                ✉️ Messages
+                                {unreadCount > 0 && (
+                                    <span className="absolute -top-2 -right-2 bg-red-600 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">
+                                        {unreadCount}
+                                    </span>
+                                )}
+                            </button>
+                        </div>
+
+                        {adminTab === 'members' && (
+                        <>
                         <p className="text-center text-sm text-gray-400 mb-4">{members ? `${members.length} member(s) · ${proCount} Pro · ${freeCount} Free · ${trialCount} on Trial` : 'Loading…'}</p>
 
                         {members && members.length > 0 && (
@@ -444,6 +537,89 @@
                                 })}
                             </div>
                         )}
+                        </>
+                        )}
+
+                        {adminTab === 'messages' && (
+                            <>
+                                {messagesError && <p className="text-red-400 text-sm text-center mb-4">{messagesError}</p>}
+                                {messages && messages.length === 0 && !messagesError && (
+                                    <p className="text-center text-gray-400 text-sm">No messages yet.</p>
+                                )}
+                                {messages && messages.length > 0 && (
+                                    <div className="space-y-2">
+                                        {messages.map(msg => (
+                                            <div key={msg.id} className={`rounded-lg p-3 ${msg.read ? 'bg-gray-700/50' : 'bg-gray-700 border border-blue-500/50'}`}>
+                                                <div className="flex items-start justify-between gap-3 mb-1">
+                                                    <div className="min-w-0">
+                                                        <div className="font-semibold text-sm truncate flex items-center gap-2">
+                                                            {msg.email || 'Unknown sender'}
+                                                            {!msg.read && <span className="text-[10px] font-bold uppercase bg-blue-600 px-2 py-0.5 rounded-full shrink-0">New</span>}
+                                                            {msg.reply && <span className="text-[10px] font-bold uppercase bg-green-600 px-2 py-0.5 rounded-full shrink-0">Replied</span>}
+                                                        </div>
+                                                        <div className="text-[11px] text-gray-400">
+                                                            {msg.createdAt ? new Date(msg.createdAt).toLocaleString() : 'Unknown date'}
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center gap-2 shrink-0">
+                                                        <button
+                                                            onClick={() => setOpenReplyId(openReplyId === msg.id ? null : msg.id)}
+                                                            className="px-2 py-1 rounded-md text-[11px] font-semibold bg-blue-600 hover:bg-blue-700 text-white"
+                                                        >
+                                                            {msg.reply ? 'Edit Reply' : 'Reply'}
+                                                        </button>
+                                                        <button
+                                                            onClick={() => toggleMessageRead(msg)}
+                                                            disabled={messageBusyId === msg.id}
+                                                            className="px-2 py-1 rounded-md text-[11px] font-semibold bg-gray-600 hover:bg-gray-500 disabled:opacity-50"
+                                                        >
+                                                            {msg.read ? 'Mark Unread' : 'Mark Read'}
+                                                        </button>
+                                                        <button
+                                                            onClick={() => deleteMessage(msg)}
+                                                            disabled={messageBusyId === msg.id}
+                                                            className="px-2 py-1 rounded-md text-[11px] font-semibold bg-red-600/80 hover:bg-red-600 disabled:opacity-50"
+                                                        >
+                                                            Delete
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                <p className="text-sm whitespace-pre-wrap">{msg.message}</p>
+
+                                                {msg.reply && (
+                                                    <div className="mt-2 pl-3 border-l-2 border-green-500/50">
+                                                        <p className="text-[11px] text-green-400 font-semibold mb-0.5">
+                                                            Your reply {msg.repliedAt ? `· ${new Date(msg.repliedAt).toLocaleString()}` : ''}
+                                                            {msg.replySeen ? ' · Seen' : ' · Not seen yet'}
+                                                        </p>
+                                                        <p className="text-sm whitespace-pre-wrap text-gray-300">{msg.reply}</p>
+                                                    </div>
+                                                )}
+
+                                                {openReplyId === msg.id && (
+                                                    <div className="mt-2">
+                                                        <textarea
+                                                            value={replyDrafts[msg.id] ?? msg.reply ?? ''}
+                                                            onChange={(e) => setReplyDrafts(prev => ({ ...prev, [msg.id]: e.target.value }))}
+                                                            placeholder="Type your reply…"
+                                                            rows={3}
+                                                            className="w-full px-3 py-2 rounded-md bg-gray-900/80 border border-gray-600 text-sm text-white"
+                                                        />
+                                                        <button
+                                                            onClick={() => sendReply(msg)}
+                                                            disabled={messageBusyId === msg.id || !(replyDrafts[msg.id] || '').trim()}
+                                                            className="mt-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-green-600 hover:bg-green-700 text-white disabled:opacity-50"
+                                                        >
+                                                            {messageBusyId === msg.id ? 'Sending…' : 'Send Reply'}
+                                                        </button>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </>
+                        )}
                     </div>
                 </div>
             );
@@ -458,10 +634,76 @@
             const [busy, setBusy] = useState(false);
             const [info, setInfo] = useState('');
             const [showPrivacyPolicy, setShowPrivacyPolicy] = useState(false);
+            const [showContactForm, setShowContactForm] = useState(false);
+            const [contactMessage, setContactMessage] = useState('');
+            const [contactBusy, setContactBusy] = useState(false);
+            const [contactSent, setContactSent] = useState(false);
+            const [contactError, setContactError] = useState('');
             const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
             const [deletePassword, setDeletePassword] = useState('');
             const [deleteError, setDeleteError] = useState('');
             const [deleteBusy, setDeleteBusy] = useState(false);
+
+            const [myMessages, setMyMessages] = useState([]);
+
+            const loadMyMessages = async () => {
+                if (!user) { setMyMessages([]); return; }
+                try {
+                    const snapshot = await window.__firebaseDb.collection('supportMessages').where('uid', '==', user.uid).get();
+                    const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+                    list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+                    setMyMessages(list);
+                } catch (e) {
+                    console.error('Could not load your messages:', e);
+                }
+            };
+
+            // Load on mount/login so the "you have a reply" badge shows up right
+            // away, not just after opening the Contact panel.
+            useEffect(() => { loadMyMessages(); }, [user]);
+
+            const unseenReplyCount = myMessages.filter(m => m.reply && !m.replySeen).length;
+
+            const markReplySeen = async (msg) => {
+                if (msg.replySeen) return;
+                try {
+                    await window.__firebaseDb.collection('supportMessages').doc(msg.id).set({ replySeen: true }, { merge: true });
+                    setMyMessages(prev => prev.map(m => m.id === msg.id ? { ...m, replySeen: true } : m));
+                } catch (e) {
+                    console.error('Could not mark reply as seen:', e);
+                }
+            };
+
+            useEffect(() => {
+                if (showContactForm) {
+                    myMessages.filter(m => m.reply && !m.replySeen).forEach(markReplySeen);
+                }
+                // eslint-disable-next-line react-hooks/exhaustive-deps
+            }, [showContactForm]);
+
+            const submitContactMessage = async () => {
+                if (!contactMessage.trim()) { setContactError('Enter a message first.'); return; }
+                if (!user) { setContactError('You need to be signed in to send a message.'); return; }
+                setContactBusy(true);
+                setContactError('');
+                try {
+                    await window.__firebaseDb.collection('supportMessages').add({
+                        uid: user.uid,
+                        email: user.email || '',
+                        message: contactMessage.trim(),
+                        createdAt: Date.now(),
+                        read: false,
+                    });
+                    setContactSent(true);
+                    setContactMessage('');
+                    loadMyMessages();
+                } catch (e) {
+                    console.error('Could not send message:', e);
+                    setContactError("Couldn't send your message -- please try again in a moment.");
+                } finally {
+                    setContactBusy(false);
+                }
+            };
 
             const isDark = theme === 'dark';
             const panelBg = isDark ? 'bg-gray-800 text-white' : 'bg-white text-gray-900';
@@ -595,6 +837,14 @@
                                         <button onClick={handleLogout} className="w-full py-2 rounded-md bg-red-600 text-white font-medium mb-2">
                                             Log Out
                                         </button>
+                                        <button onClick={() => { setOpen(false); setShowContactForm(true); }} className="w-full py-2 rounded-md bg-gray-600 hover:bg-gray-500 text-white text-sm font-medium mb-2 relative">
+                                            ✉️ Contact / Support
+                                            {unseenReplyCount > 0 && (
+                                                <span className="absolute -top-1.5 -right-1.5 bg-red-600 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">
+                                                    {unseenReplyCount}
+                                                </span>
+                                            )}
+                                        </button>
                                         <button onClick={() => setShowPrivacyPolicy(true)} className="w-full text-xs underline opacity-70 mb-3">
                                             Privacy Policy
                                         </button>
@@ -705,6 +955,71 @@
                                 <button onClick={() => setShowPrivacyPolicy(false)} className="w-full py-2 rounded-md border mt-4">
                                     Close
                                 </button>
+                            </div>
+                        </div>
+                    )}
+
+                    {showContactForm && (
+                        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
+                            <div className={`w-full max-w-md max-h-[85vh] overflow-y-auto rounded-xl shadow-2xl p-6 ${panelBg}`}>
+                                <h2 className="text-lg font-bold mb-1">Contact / Support</h2>
+                                <p className="text-xs opacity-70 mb-3">Questions, comments, bug reports -- send a message and it'll go straight to the site admin.</p>
+
+                                {myMessages.length > 0 && (
+                                    <div className="mb-4 space-y-2">
+                                        <p className="text-xs font-semibold opacity-70">Your messages</p>
+                                        {myMessages.map(msg => (
+                                            <div key={msg.id} className="rounded-md border border-gray-500/30 p-2.5">
+                                                <p className="text-[11px] opacity-60 mb-1">{msg.createdAt ? new Date(msg.createdAt).toLocaleString() : ''}</p>
+                                                <p className="text-sm whitespace-pre-wrap">{msg.message}</p>
+                                                {msg.reply ? (
+                                                    <div className="mt-2 pl-2.5 border-l-2 border-blue-500/50">
+                                                        <p className="text-[11px] text-blue-400 font-semibold mb-0.5">Admin reply:</p>
+                                                        <p className="text-sm whitespace-pre-wrap">{msg.reply}</p>
+                                                    </div>
+                                                ) : (
+                                                    <p className="text-[11px] opacity-50 mt-1.5 italic">Waiting on a reply…</p>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+
+                                {contactSent ? (
+                                    <>
+                                        <p className="text-sm text-green-500 font-medium py-4 text-center">✅ Message sent -- thanks for reaching out!</p>
+                                        <button
+                                            onClick={() => { setShowContactForm(false); setContactSent(false); }}
+                                            className="w-full py-2 rounded-md border"
+                                        >
+                                            Close
+                                        </button>
+                                    </>
+                                ) : (
+                                    <>
+                                        <textarea
+                                            value={contactMessage}
+                                            onChange={(e) => setContactMessage(e.target.value)}
+                                            placeholder="What's on your mind?"
+                                            rows={4}
+                                            className={`w-full px-3 py-2 rounded-md border mb-2 text-sm ${panelBg}`}
+                                        />
+                                        {contactError && <p className="text-red-500 text-xs mb-2">{contactError}</p>}
+                                        <button
+                                            onClick={submitContactMessage}
+                                            disabled={contactBusy}
+                                            className="w-full py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white font-medium mb-2 disabled:opacity-50"
+                                        >
+                                            {contactBusy ? 'Sending…' : 'Send New Message'}
+                                        </button>
+                                        <button
+                                            onClick={() => { setShowContactForm(false); setContactMessage(''); setContactError(''); }}
+                                            className="w-full py-2 rounded-md border"
+                                        >
+                                            Close
+                                        </button>
+                                    </>
+                                )}
                             </div>
                         </div>
                     )}
