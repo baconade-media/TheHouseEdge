@@ -291,6 +291,8 @@
             const [members, setMembers] = useState(null);
             const [error, setError] = useState('');
             const [busyId, setBusyId] = useState(null);
+            const [tierFilter, setTierFilter] = useState('all'); // 'all' | 'free' | 'pro' | 'trial'
+            const [sortOrder, setSortOrder] = useState('newest'); // 'newest' | 'oldest'
 
             const loadMembers = async () => {
                 setError('');
@@ -337,6 +339,21 @@
 
             const proCount = members ? members.filter(m => m.tier === 'pro').length : 0;
             const freeCount = members ? members.filter(m => m.tier !== 'pro').length : 0;
+            const trialCount = members ? members.filter(m => m.trialEndsAt && m.trialEndsAt > Date.now()).length : 0;
+
+            const visibleMembers = members
+                ? members
+                    .filter(m => {
+                        const onTrial = m.trialEndsAt && m.trialEndsAt > Date.now();
+                        if (tierFilter === 'pro') return m.tier === 'pro';
+                        if (tierFilter === 'free') return m.tier !== 'pro' && !onTrial;
+                        if (tierFilter === 'trial') return onTrial;
+                        return true; // 'all'
+                    })
+                    .sort((a, b) => sortOrder === 'newest'
+                        ? (b.createdAt || 0) - (a.createdAt || 0)
+                        : (a.createdAt || 0) - (b.createdAt || 0))
+                : [];
 
             return (
                 <div className="min-h-screen flex flex-col items-center bg-gray-900 text-white p-4" style={{ minHeight: '100dvh' }}>
@@ -349,7 +366,29 @@
                     </button>
                     <div className="bg-gray-800 p-5 sm:p-6 rounded-2xl shadow-2xl w-[92vw] max-w-[900px] mt-16 mb-8" style={{ margin: 'auto' }}>
                         <h2 className="text-3xl font-black text-center mb-1 text-blue-400">Admin Dashboard</h2>
-                        <p className="text-center text-sm text-gray-400 mb-6">{members ? `${members.length} member(s) · ${proCount} Pro · ${freeCount} Free` : 'Loading…'}</p>
+                        <p className="text-center text-sm text-gray-400 mb-4">{members ? `${members.length} member(s) · ${proCount} Pro · ${freeCount} Free · ${trialCount} on Trial` : 'Loading…'}</p>
+
+                        {members && members.length > 0 && (
+                            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                                <div className="flex gap-2">
+                                    {[['all', 'All'], ['pro', 'Pro'], ['free', 'Free'], ['trial', 'Trial']].map(([key, label]) => (
+                                        <button
+                                            key={key}
+                                            onClick={() => setTierFilter(key)}
+                                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${tierFilter === key ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+                                        >
+                                            {label}
+                                        </button>
+                                    ))}
+                                </div>
+                                <button
+                                    onClick={() => setSortOrder(prev => prev === 'newest' ? 'oldest' : 'newest')}
+                                    className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-gray-700 text-gray-300 hover:bg-gray-600 flex items-center gap-1"
+                                >
+                                    Joined: {sortOrder === 'newest' ? 'Newest first' : 'Oldest first'} {sortOrder === 'newest' ? '↓' : '↑'}
+                                </button>
+                            </div>
+                        )}
 
                         {error && <p className="text-red-400 text-sm text-center mb-4">{error}</p>}
 
@@ -357,9 +396,13 @@
                             <p className="text-center text-gray-400 text-sm">No members found yet.</p>
                         )}
 
-                        {members && members.length > 0 && (
+                        {members && members.length > 0 && visibleMembers.length === 0 && (
+                            <p className="text-center text-gray-400 text-sm">No members match this filter.</p>
+                        )}
+
+                        {visibleMembers.length > 0 && (
                             <div className="space-y-2">
-                                {members.map(member => {
+                                {visibleMembers.map(member => {
                                     const onTrial = member.trialEndsAt && member.trialEndsAt > Date.now();
                                     const trialDaysLeft = onTrial ? Math.max(1, Math.ceil((member.trialEndsAt - Date.now()) / (24 * 60 * 60 * 1000))) : 0;
                                     return (
