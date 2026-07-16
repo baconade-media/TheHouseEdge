@@ -838,6 +838,84 @@
             10000, 25000, 50000, 100000
         ];
 
+        /**
+         * DraftNumberInput Component
+         * A plain number input has a common frustration: if onChange does
+         * something like `setValue(parseInt(e.target.value) || 0)`, the moment
+         * you clear the field to retype a number, it immediately snaps back to
+         * showing "0" (since parseInt('') is NaN, and NaN || 0 is 0) -- you can
+         * never see it actually empty while typing.
+         *
+         * This component keeps a separate local "draft" string that's allowed
+         * to be empty or mid-typing (like just "-" or "1."), only committing a
+         * real number to the parent via onChange once the draft is a valid
+         * number. If the field is left empty on blur, it reverts the display
+         * back to the last committed value rather than staying stuck blank.
+         *
+         * @param {number} value - the committed numeric value
+         * @param {function} onChange - called with a new number once valid
+         * @param {number} [min] / [max] - optional clamping range
+         * @param {boolean} [allowDecimal] - allow a decimal point (default false)
+         */
+        const DraftNumberInput = ({ value, onChange, min, max, allowDecimal = false, className, placeholder }) => {
+            const toDisplayString = (v) => (v === null || v === undefined || Number.isNaN(v)) ? '' : String(v);
+            const [draft, setDraft] = useState(() => toDisplayString(value));
+
+            // Keep the draft in sync when the committed value changes from
+            // OUTSIDE this input (e.g. a Reset button) -- but don't fight the
+            // user mid-typing if the draft already represents the same number.
+            useEffect(() => {
+                const asString = toDisplayString(value);
+                const draftAsNumber = draft === '' ? NaN : (allowDecimal ? parseFloat(draft) : parseInt(draft, 10));
+                if (draftAsNumber !== value) {
+                    setDraft(asString);
+                }
+                // eslint-disable-next-line react-hooks/exhaustive-deps
+            }, [value]);
+
+            const commitIfValid = (raw) => {
+                if (raw === '' || raw === '-') return; // still typing, nothing to commit yet
+                const parsed = allowDecimal ? parseFloat(raw) : parseInt(raw, 10);
+                if (Number.isNaN(parsed)) return;
+                let clamped = parsed;
+                if (typeof min === 'number') clamped = Math.max(min, clamped);
+                if (typeof max === 'number') clamped = Math.min(max, clamped);
+                onChange(clamped);
+            };
+
+            const handleChange = (e) => {
+                const raw = e.target.value;
+                const pattern = allowDecimal ? /^-?\d*\.?\d*$/ : /^-?\d*$/;
+                if (raw === '' || pattern.test(raw)) {
+                    setDraft(raw);
+                    commitIfValid(raw);
+                }
+            };
+
+            const handleBlur = () => {
+                const parsed = draft === '' ? NaN : (allowDecimal ? parseFloat(draft) : parseInt(draft, 10));
+                if (Number.isNaN(parsed)) {
+                    setDraft(toDisplayString(value)); // revert to last committed value
+                } else {
+                    commitIfValid(draft);
+                    setDraft(toDisplayString(parsed));
+                }
+            };
+
+            return (
+                <input
+                    type="text"
+                    inputMode={allowDecimal ? 'decimal' : 'numeric'}
+                    value={draft}
+                    onChange={handleChange}
+                    onBlur={handleBlur}
+                    placeholder={placeholder}
+                    className={className}
+                />
+            );
+        };
+
+
         const WheelPicker = ({ value, onChange, min, max, step = 1, values: customValues, formatValue, width = '5rem' }) => {
             const wheelRef = useRef(null);
             const ITEM_HEIGHT = 36;
@@ -3089,62 +3167,46 @@ stack = Math.round(stack / roundingUnit) * roundingUnit;
 			
             // Helper function to normalize payout percentages to sum up to targetSum (default 100)
             const normalizePayouts = (payouts, changedId = null) => {
-                if (payouts.length === 0) {
-                    return [];
+                if (payouts.length === 0) return [];
+
+                const changedIndex = payouts.findIndex(p => p.id === changedId);
+                const fixedPercentage = changedIndex >= 0 ? payouts[changedIndex].percentage : null;
+
+                const others = payouts.filter((_, i) => i !== changedIndex);
+                const remaining = fixedPercentage !== null ? Math.max(0, 100 - fixedPercentage) : 100;
+                const othersSum = others.reduce((sum, p) => sum + p.percentage, 0);
+
+                let rescaledOthers;
+                if (others.length === 0) {
+                    rescaledOthers = [];
+                } else if (othersSum > 0) {
+                    const scale = remaining / othersSum;
+                    rescaledOthers = others.map(p => ({ ...p, percentage: Math.round(p.percentage * scale) }));
+                } else {
+                    const share = remaining / others.length;
+                    rescaledOthers = others.map(p => ({ ...p, percentage: Math.round(share) }));
                 }
 
-                let totalAdjustablePercentage = 100;
-                let sumOfFixedPercentages = 0;
-                let fixedPayouts = [];
-                let adjustablePayouts = [];
-
-                // Separate payouts into fixed (recently changed) and adjustable (others)
-                payouts.forEach(payout => {
-                    if (payout.id === changedId) {
-                        fixedPayouts.push(payout);
-                        sumOfFixedPercentages += payout.percentage;
-                    } else {
-                        adjustablePayouts.push(payout);
-                    }
+                // Reassemble in the ORIGINAL order (not "changed one first") --
+                // downstream code and the UI both expect payouts to stay in
+                // place order.
+                let result = payouts.map((p, i) => {
+                    if (i === changedIndex) return { ...p, percentage: fixedPercentage };
+                    const idx = others.findIndex(o => o.id === p.id);
+                    return rescaledOthers[idx];
                 });
 
-                // Calculate the remaining percentage to distribute among adjustable payouts
-                totalAdjustablePercentage = Math.max(0, 100 - sumOfFixedPercentages);
-
-                const sumOfCurrentAdjustablePercentages = adjustablePayouts.reduce((sum, p) => sum + p.percentage, 0);
-
-                let scaledAdjustablePayouts = [];
-                if (sumOfCurrentAdjustablePercentages > 0 && adjustablePayouts.length > 0) {
-                    // Scale adjustable payouts to fit the remaining percentage, rounding to whole numbers
-                    const scaleFactor = totalAdjustablePercentage / sumOfCurrentAdjustablePercentages;
-                    scaledAdjustablePayouts = adjustablePayouts.map(p => ({
-                        ...p,
-                        percentage: Math.round(p.percentage * scaleFactor)
-                    }));
-                } else if (adjustablePayouts.length > 0) {
-                    // If no current adjustable percentages, distribute equally among them, rounding to whole numbers
-                    const equalShare = totalAdjustablePercentage / adjustablePayouts.length;
-                    scaledAdjustablePayouts = adjustablePayouts.map(p => ({
-                        ...p,
-                        percentage: Math.round(equalShare)
-                    }));
+                // Force an exact 100% total, absorbing any rounding drift into
+                // one place -- the changed one if there was one, otherwise the
+                // last place.
+                const total = result.reduce((sum, p) => sum + p.percentage, 0);
+                if (total !== 100 && result.length > 0) {
+                    const diff = 100 - total;
+                    const targetIndex = changedIndex >= 0 ? changedIndex : result.length - 1;
+                    result = result.map((p, i) => i === targetIndex ? { ...p, percentage: p.percentage + diff } : p);
                 }
 
-                // Combine fixed and scaled adjustable payouts
-                const newPayouts = [...fixedPayouts, ...scaledAdjustablePayouts];
-
-                // Re-check and ensure exactly 100% due to floating point inaccuracies
-                const finalSum = newPayouts.reduce((sum, p) => sum + p.percentage, 0);
-                if (finalSum !== 100 && newPayouts.length > 0) {
-                    const diff = 100 - finalSum;
-                    // Find the payout that was most recently changed (if any), or the first one
-                    const targetPayout = fixedPayouts.length > 0 ? fixedPayouts[0] : newPayouts[0];
-                    if (targetPayout) {
-                        targetPayout.percentage = Math.round(targetPayout.percentage + diff);
-                    }
-                }
-
-                return newPayouts;
+                return result;
             };
 
             // Generates a smooth, standard-shaped payout curve (1st place gets the
@@ -4377,31 +4439,28 @@ const getPerPlayerCountForChip = (chipId) => {
                                                         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 flex-grow justify-start"> {/* Use flex-wrap for inputs */}
                                                             <div className="flex items-center gap-2">
                                                                 <label className={`${subtextColorClass} text-sm whitespace-nowrap`}>SB:</label>
-                                                                <input
-                                                                    type="number"
+                                                                <DraftNumberInput
                                                                     value={level.sb}
-                                                                    onChange={(e) => updateLevel(level.id, 'sb', parseInt(e.target.value) || 0)}
-                                                                    min="0"
+                                                                    onChange={(v) => updateLevel(level.id, 'sb', v)}
+                                                                    min={0}
                                                                     className={`w-20 px-2 py-1 rounded-md ${inputBgClass} ${inputBorderClass} ${subtextColorClass}`}
                                                                 />
                                                             </div>
                                                             <div className="flex items-center gap-2">
                                                                 <label className={`${subtextColorClass} text-sm whitespace-nowrap`}>BB:</label>
-                                                                <input
-                                                                    type="number"
+                                                                <DraftNumberInput
                                                                     value={level.bb}
-                                                                    onChange={(e) => updateLevel(level.id, 'bb', parseInt(e.target.value) || 0)}
-                                                                    min="0"
+                                                                    onChange={(v) => updateLevel(level.id, 'bb', v)}
+                                                                    min={0}
                                                                     className={`w-20 px-2 py-1 rounded-md ${inputBgClass} ${inputBorderClass} ${subtextColorClass}`}
                                                                 />
                                                             </div>
                                                             <div className="flex items-center gap-2">
                                                                 <label className={`${subtextColorClass} text-sm whitespace-nowrap`}>Ante:</label>
-                                                                <input
-                                                                    type="number"
+                                                                <DraftNumberInput
                                                                     value={level.ante}
-                                                                    onChange={(e) => updateLevel(level.id, 'ante', parseInt(e.target.value) || 0)}
-                                                                    min="0"
+                                                                    onChange={(v) => updateLevel(level.id, 'ante', v)}
+                                                                    min={0}
                                                                     className={`w-20 px-2 py-1 rounded-md ${inputBgClass} ${inputBorderClass} ${subtextColorClass}`}
                                                                 />
                                                             </div>
@@ -4538,31 +4597,31 @@ const getPerPlayerCountForChip = (chipId) => {
 											<div className="bg-gray-800 bg-opacity-50 rounded-xl p-5 space-y-4">
 											  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
 												<label className="text-gray-200 font-semibold text-base md:text-lg whitespace-nowrap">Smallest Chip Value:</label>
-												<input
-												  type="number"
+												<DraftNumberInput
 												  value={smallestChip || 25}
-												  onChange={(e) => setSmallestChip(Math.max(1, parseInt(e.target.value) || 25))}
+												  onChange={setSmallestChip}
+												  min={1}
 												  className="w-32 px-3 py-2 rounded-lg bg-gray-700 border-2 border-gray-600 text-white text-center font-bold text-lg focus:border-yellow-400 focus:outline-none"
 												/>
 											  </div>
 
 											  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
 												<label className="text-gray-200 font-semibold text-base md:text-lg whitespace-nowrap">Highest Chip Value:</label>
-												<input
-												  type="number"
+												<DraftNumberInput
 												  value={highestChip}
-												  onChange={(e) => setHighestChip(Math.max(1, parseInt(e.target.value) || 1000))}
+												  onChange={setHighestChip}
+												  min={1}
 												  className="w-32 px-3 py-2 rounded-lg bg-gray-700 border-2 border-gray-600 text-white text-center font-bold text-lg focus:border-yellow-400 focus:outline-none"
 												/>
 											  </div>
 
 											  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
 												<label className="text-gray-200 font-semibold text-base md:text-lg whitespace-nowrap">Tournament Length (hours):</label>
-												<input
-												  type="number"
-												  step="0.5"
+												<DraftNumberInput
 												  value={targetHours}
-												  onChange={(e) => setTargetHours(Math.max(1, parseFloat(e.target.value) || 1))}
+												  onChange={setTargetHours}
+												  min={1}
+												  allowDecimal={true}
 												  className="w-32 px-3 py-2 rounded-lg bg-gray-700 border-2 border-gray-600 text-white text-center font-bold text-lg focus:border-yellow-400 focus:outline-none"
 												/>
 											  </div>
@@ -4868,15 +4927,11 @@ const getPerPlayerCountForChip = (chipId) => {
                                                     </div>
                                                     <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center`}>
                                                         <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5`}>Target Starting Stack</label>
-                                                        <input
-                                                            type="number"
-                                                            min="0"
-                                                            step="1"
-                                                            value={customStackTarget !== null ? customStackTarget : (autoSuggestedStack ?? '')}
-                                                            onChange={(e) => {
-                                                                const v = e.target.value;
-                                                                setCustomStackTarget(v === '' ? null : (parseInt(v) || 0));
-                                                            }}
+                                                        <DraftNumberInput
+                                                            value={customStackTarget}
+                                                            onChange={setCustomStackTarget}
+                                                            min={0}
+                                                            placeholder={autoSuggestedStack ? `${autoSuggestedStack.toLocaleString()}` : ''}
                                                             className="w-full px-3 py-2 rounded-md bg-gray-900/80 border border-yellow-400/70 text-yellow-200 font-semibold text-lg focus:outline-none focus:ring-2 focus:ring-yellow-400"
                                                         />
                                                         <div className="flex items-center justify-between mt-1.5">
@@ -6900,21 +6955,21 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                                                     <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center`}>
                                                         <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5`}>Small Blind</label>
-                                                        <input
-                                                            type="number"
-                                                            min="0" step="0.01"
+                                                        <DraftNumberInput
                                                             value={cashSmallBlind}
-                                                            onChange={(e) => setCashSmallBlind(parseFloat(e.target.value) || 0)}
+                                                            onChange={setCashSmallBlind}
+                                                            min={0}
+                                                            allowDecimal={true}
                                                             className="w-full px-3 py-2 rounded-md bg-gray-900/80 border border-cyan-400/70 text-cyan-200 font-semibold text-lg focus:outline-none focus:ring-2 focus:ring-cyan-400"
                                                         />
                                                     </div>
                                                     <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center`}>
                                                         <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5`}>Big Blind</label>
-                                                        <input
-                                                            type="number"
-                                                            min="0" step="0.01"
+                                                        <DraftNumberInput
                                                             value={cashBigBlind}
-                                                            onChange={(e) => setCashBigBlind(parseFloat(e.target.value) || 0)}
+                                                            onChange={setCashBigBlind}
+                                                            min={0}
+                                                            allowDecimal={true}
                                                             className="w-full px-3 py-2 rounded-md bg-gray-900/80 border border-cyan-400/70 text-cyan-200 font-semibold text-lg focus:outline-none focus:ring-2 focus:ring-cyan-400"
                                                         />
                                                     </div>
@@ -6945,24 +7000,22 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                                 <div className="grid grid-cols-2 gap-3 mt-3">
                                                     <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center`}>
                                                         <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5`}>Min Buy-in ($)</label>
-                                                        <input
-                                                            type="number"
-                                                            min="0" step="0.01"
+                                                        <DraftNumberInput
                                                             value={cashMinBuyIn}
-                                                            onChange={(e) => setCashMinBuyIn(parseFloat(e.target.value) || 0)}
+                                                            onChange={setCashMinBuyIn}
+                                                            min={0}
+                                                            allowDecimal={true}
                                                             className="w-full px-3 py-2 rounded-md bg-gray-900/80 border border-cyan-400/70 text-cyan-200 font-semibold text-lg focus:outline-none focus:ring-2 focus:ring-cyan-400"
-                                                            inputMode="decimal"
                                                         />
                                                     </div>
                                                     <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center`}>
                                                         <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5`}>Max Buy-in ($)</label>
-                                                        <input
-                                                            type="number"
-                                                            min="0" step="0.01"
+                                                        <DraftNumberInput
                                                             value={cashMaxBuyIn}
-                                                            onChange={(e) => setCashMaxBuyIn(parseFloat(e.target.value) || 0)}
+                                                            onChange={setCashMaxBuyIn}
+                                                            min={0}
+                                                            allowDecimal={true}
                                                             className="w-full px-3 py-2 rounded-md bg-gray-900/80 border border-cyan-400/70 text-cyan-200 font-semibold text-lg focus:outline-none focus:ring-2 focus:ring-cyan-400"
-                                                            inputMode="decimal"
                                                         />
                                                     </div>
                                                 </div>
