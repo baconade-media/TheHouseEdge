@@ -4804,13 +4804,12 @@ const getPerPlayerCountForChip = (chipId) => {
                                                     <span className={`${subtextColorClass} font-semibold w-28 text-right`}>
                                                         {payout.place}{payout.place === 1 ? 'st' : payout.place === 2 ? 'nd' : payout.place === 3 ? 'rd' : 'th'} Place:
                                                     </span>
-                                                    <WheelPicker
+                                                    <DraftNumberInput
                                                         value={payout.percentage}
-                                                        onChange={(v) => updatePayoutPlace(payout.id, 'percentage', v)}
+                                                        onChange={(v) => updatePayoutPlace(payout.id, 'percentage', Math.max(0, Math.min(100, v)))}
                                                         min={0}
                                                         max={100}
-                                                        step={1}
-                                                        width="4rem"
+                                                        className={`w-20 px-2 py-1 rounded-md ${inputBgClass} ${inputBorderClass} ${subtextColorClass} text-xl text-center`}
                                                     />
                                                     <span className={`${subtextColorClass} text-xl font-semibold`}>%</span>
                                                     <span className={`font-semibold ${subtextColorClass} w-28 text-left ml-4`}>
@@ -6690,12 +6689,11 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                         <div className="flex flex-col space-y-4 mb-6">
                                             <div className="flex items-center space-x-2">
                                                 <label htmlFor="jackpot-amount" className={`${subtextColorClass} text-base whitespace-nowrap w-40 text-right`}>Jackpot Amount ($):</label>
-                                                <WheelPicker
+                                                <DraftNumberInput
                                                     value={badBeatJackpotAmount}
-                                                    min={0} max={25000} step={1}
                                                     onChange={setBadBeatJackpotAmount}
-                                                    formatValue={(v) => `$${v.toLocaleString()}`}
-                                                    width="6rem"
+                                                    min={0}
+                                                    className={`w-32 px-3 py-2 rounded-md ${inputBgClass} ${inputBorderClass} ${subtextColorClass} text-lg text-center`}
                                                 />
                                             </div>
                                             <div className="flex flex-col items-center justify-center space-y-2 mt-4">
@@ -6802,12 +6800,11 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
       </div>
       <div className="flex items-center justify-between pl-4">
         <span className={`${subtextColorClass} text-sm`}>Bounty amount ($):</span>
-        <WheelPicker
+        <DraftNumberInput
           value={parseFloat(sevenDeuceBounty) || 0}
           onChange={setSevenDeuceBounty}
-          min={0} max={2000} step={1}
-          formatValue={(v) => `$${v}`}
-          width="5rem"
+          min={0}
+          className={`w-24 px-2 py-1 rounded-md ${inputBgClass} ${inputBorderClass} ${subtextColorClass} text-center`}
         />
       </div>
     </div>
@@ -6835,12 +6832,11 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
       </div>
       <div className="flex items-center justify-between pl-4">
         <span className={`${subtextColorClass} text-sm`}>Bounty amount ($):</span>
-        <WheelPicker
+        <DraftNumberInput
           value={parseFloat(nitGameBounty) || 0}
           onChange={setNitGameBounty}
-          min={0} max={2000} step={1}
-          formatValue={(v) => `$${v}`}
-          width="5rem"
+          min={0}
+          className={`w-24 px-2 py-1 rounded-md ${inputBgClass} ${inputBorderClass} ${subtextColorClass} text-center`}
         />
       </div>
     </div>
@@ -6868,12 +6864,11 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
       </div>
       <div className="flex items-center justify-between pl-4">
         <span className={`${subtextColorClass} text-sm`}>Bounty amount ($):</span>
-        <WheelPicker
+        <DraftNumberInput
           value={parseFloat(squidGameBounty) || 0}
           onChange={setSquidGameBounty}
-          min={0} max={2000} step={1}
-          formatValue={(v) => `$${v}`}
-          width="5rem"
+          min={0}
+          className={`w-24 px-2 py-1 rounded-md ${inputBgClass} ${inputBorderClass} ${subtextColorClass} text-center`}
         />
       </div>
     </div>
