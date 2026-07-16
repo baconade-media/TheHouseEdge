@@ -898,8 +898,26 @@
 
             useEffect(() => () => clearTimeout(commitTimeoutRef.current), []);
 
+            // Distinguishes a genuine user scroll from a scroll event WE caused
+            // ourselves (the position-correction effect below). Without this,
+            // setting scrollTop programmatically fires a native 'scroll' event
+            // that handleScroll would treat as real user input -- recomputing
+            // and (after the debounce) re-committing a value. If that landed on
+            // a neighboring row instead of the exact one (e.g. from CSS
+            // scroll-snap adjusting position on the next frame, or the
+            // virtualized window re-rendering asynchronously), the value would
+            // silently drift by a step or two -- exactly the "200 became 240
+            // after loading a preset" bug.
+            const isProgrammaticScroll = useRef(false);
+
             const handleScroll = () => {
                 if (!wheelRef.current) return;
+                if (isProgrammaticScroll.current) {
+                    isProgrammaticScroll.current = false;
+                    setScrollTop(wheelRef.current.scrollTop); // keep virtualization window in sync
+                    return;
+                }
+
                 const newScrollTop = wheelRef.current.scrollTop;
                 setScrollTop(newScrollTop);
 
@@ -924,6 +942,7 @@
                 if (index >= 0) {
                     const target = index * ITEM_HEIGHT;
                     if (Math.abs(wheelRef.current.scrollTop - target) > 1) {
+                        isProgrammaticScroll.current = true;
                         wheelRef.current.scrollTop = target;
                         setScrollTop(target);
                     }
@@ -3222,6 +3241,8 @@ stack = Math.round(stack / roundingUnit) * roundingUnit;
 
             // --- Chip Set Presets (save/load whole denomination sets, since
             // different tournament nights may use physically different chip sets) ---
+            const [presetLoadedMessage, setPresetLoadedMessage] = useState('');
+
             const saveCurrentAsPreset = () => {
                 const name = newChipPresetName.trim();
                 if (!name) { alert('Enter a name for this chip set first.'); return; }
@@ -3229,7 +3250,10 @@ stack = Math.round(stack / roundingUnit) * roundingUnit;
                 const preset = {
                     id: Date.now().toString(),
                     name,
-                    denominations: chipDenominations.map(c => ({ value: c.value, color: c.color, quantity: c.quantity || 0 }))
+                    denominations: chipDenominations.map(c => ({ value: c.value, color: c.color, quantity: c.quantity || 0 })),
+                    players: chipPlayers,
+                    customStackTarget: customStackTarget,
+                    chipBias: chipBias,
                 };
                 setChipPresets(prev => [...prev, preset]);
                 setNewChipPresetName('');
@@ -3244,6 +3268,16 @@ stack = Math.round(stack / roundingUnit) * roundingUnit;
                     color: d.color,
                     quantity: d.quantity
                 })));
+                // Guarded so presets saved before this feature existed (no
+                // players/target/bias fields yet) don't clobber current settings
+                // with undefined.
+                if (typeof preset.players === 'number') setChipPlayers(preset.players);
+                if (typeof preset.customStackTarget !== 'undefined') setCustomStackTarget(preset.customStackTarget);
+                if (typeof preset.chipBias === 'string') setChipBias(preset.chipBias);
+
+                setPresetLoadedMessage(`✅ Loaded "${preset.name}"`);
+                clearTimeout(window.__presetToastTimeout);
+                window.__presetToastTimeout = setTimeout(() => setPresetLoadedMessage(''), 2500);
             };
 
             const renameChipPreset = (presetId) => {
@@ -4775,7 +4809,7 @@ const getPerPlayerCountForChip = (chipId) => {
                                             {/* Chip Set Presets -- save/load whole denomination sets, since
                                                 different tournament nights may use physically different chips */}
                                             <div className={`${sectionBgClass} rounded-lg p-3`}>
-                                                <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5 block`}>Chip Set Presets</label>
+                                                <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5 block`}>Chip Set Presets (chips, players, target stack, style)</label>
                                                 <select
                                                     value=""
                                                     onChange={(e) => { if (e.target.value) loadChipPreset(e.target.value); }}
@@ -4786,6 +4820,9 @@ const getPerPlayerCountForChip = (chipId) => {
                                                         <option key={p.id} value={p.id}>{p.name} ({p.denominations.length} chips)</option>
                                                     ))}
                                                 </select>
+                                                {presetLoadedMessage && (
+                                                    <p className="text-xs text-green-400 font-semibold mb-2 text-center">{presetLoadedMessage}</p>
+                                                )}
                                                 <div className="flex gap-2">
                                                     <input
                                                         type="text"
@@ -5352,6 +5389,8 @@ const getPerPlayerCountForChip = (chipId) => {
                 localStorage.setItem('cashChipPresets', JSON.stringify(cashChipPresets));
             }, [cashChipPresets]);
 
+            const [presetLoadedMessage, setPresetLoadedMessage] = useState('');
+
             const saveCashChipPreset = () => {
                 const name = newCashChipPresetName.trim();
                 if (!name) { alert('Enter a name for this chip set first.'); return; }
@@ -5359,7 +5398,12 @@ const getPerPlayerCountForChip = (chipId) => {
                 const preset = {
                     id: Date.now().toString(),
                     name,
-                    denominations: chipDenominations.map(c => ({ value: parseFloat(c.value) || 0, color: c.color, quantity: c.quantity || 0 }))
+                    denominations: chipDenominations.map(c => ({ value: parseFloat(c.value) || 0, color: c.color, quantity: c.quantity || 0 })),
+                    smallBlind: cashSmallBlind,
+                    bigBlind: cashBigBlind,
+                    players: cashPlayers,
+                    minBuyIn: cashMinBuyIn,
+                    maxBuyIn: cashMaxBuyIn,
                 };
                 setCashChipPresets(prev => [...prev, preset]);
                 setNewCashChipPresetName('');
@@ -5374,6 +5418,18 @@ const getPerPlayerCountForChip = (chipId) => {
                     color: d.color,
                     quantity: d.quantity
                 })));
+                // Guarded with typeof checks so presets saved before this feature
+                // existed (no blind/player/buy-in fields yet) don't clobber the
+                // current settings with undefined.
+                if (typeof preset.smallBlind === 'number') setCashSmallBlind(preset.smallBlind);
+                if (typeof preset.bigBlind === 'number') setCashBigBlind(preset.bigBlind);
+                if (typeof preset.players === 'number') setCashPlayers(preset.players);
+                if (typeof preset.minBuyIn === 'number') setCashMinBuyIn(preset.minBuyIn);
+                if (typeof preset.maxBuyIn === 'number') setCashMaxBuyIn(preset.maxBuyIn);
+
+                setPresetLoadedMessage(`✅ Loaded "${preset.name}"`);
+                clearTimeout(window.__presetToastTimeout);
+                window.__presetToastTimeout = setTimeout(() => setPresetLoadedMessage(''), 2500);
             };
 
             const renameCashChipPreset = (presetId) => {
@@ -6791,17 +6847,20 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
 
                                             {/* Cash Game Chip Set Presets */}
                                             <div className={`${sectionBgClass} rounded-lg p-3`}>
-                                                <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5 block`}>Chip Set Presets</label>
+                                                <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5 block`}>Table Setup Presets (chips, blinds, players, buy-in)</label>
                                                 <select
                                                     value=""
                                                     onChange={(e) => { if (e.target.value) loadCashChipPreset(e.target.value); }}
                                                     className={`w-full px-3 py-2 rounded-md ${inputBgClass} ${inputBorderClass} border ${subtextColorClass} mb-2`}
                                                 >
-                                                    <option value="">Load a saved chip set…</option>
+                                                    <option value="">Load a saved table setup…</option>
                                                     {cashChipPresets.map(p => (
                                                         <option key={p.id} value={p.id}>{p.name} ({p.denominations.length} chips)</option>
                                                     ))}
                                                 </select>
+                                                {presetLoadedMessage && (
+                                                    <p className="text-xs text-green-400 font-semibold mb-2 text-center">{presetLoadedMessage}</p>
+                                                )}
                                                 <div className="flex gap-2">
                                                     <input
                                                         type="text"
