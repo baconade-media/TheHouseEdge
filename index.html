@@ -2832,6 +2832,13 @@
             // currentLevelIndex but should still broadcast.
             const [syncNonce, setSyncNonce] = useState(0);
             const [liveSyncActive, setLiveSyncActive] = useState(false);
+            const [liveSyncEnabled, setLiveSyncEnabled] = useState(() => {
+                const saved = localStorage.getItem('tournamentLiveSyncEnabled');
+                return saved !== null ? JSON.parse(saved) : true; // on by default for Pro users
+            });
+            useEffect(() => {
+                localStorage.setItem('tournamentLiveSyncEnabled', JSON.stringify(liveSyncEnabled));
+            }, [liveSyncEnabled]);
             const lastSyncPushAtRef = useRef(0);
             const hasMountedSyncRef = useRef(false);
 
@@ -3337,7 +3344,7 @@ stack = Math.round(stack / roundingUnit) * roundingUnit;
             // write every second. Instead the receiving device recalculates
             // "time remaining right now" using the timestamp of this write.
             useEffect(() => {
-                if (!isPro || !authUser) { setLiveSyncActive(false); return; }
+                if (!isPro || !authUser || !liveSyncEnabled) { setLiveSyncActive(false); return; }
                 if (!hasMountedSyncRef.current) { hasMountedSyncRef.current = true; return; } // skip the initial mount
                 const payload = {
                     currentLevelIndex,
@@ -3351,14 +3358,14 @@ stack = Math.round(stack / roundingUnit) * roundingUnit;
                     .then(() => setLiveSyncActive(true))
                     .catch(e => console.error('Clock sync push failed:', e));
                 // eslint-disable-next-line react-hooks/exhaustive-deps
-            }, [isRunning, currentLevelIndex, syncNonce, isPro, authUser]);
+            }, [isRunning, currentLevelIndex, syncNonce, isPro, authUser, liveSyncEnabled]);
 
             // Effect 2c: Listen for clock state pushed from another device.
             // Firestore's snapshot.metadata.hasPendingWrites tells us whether a
             // given snapshot is our own not-yet-confirmed write (skip it, we
             // already applied it locally) or a genuinely remote change (apply it).
             useEffect(() => {
-                if (!isPro || !authUser) return;
+                if (!isPro || !authUser || !liveSyncEnabled) return;
                 const unsubscribe = window.__firebaseDb.collection('liveClockSync').doc(`${authUser.uid}_tournament`)
                     .onSnapshot(snapshot => {
                         if (snapshot.metadata.hasPendingWrites) return;
@@ -4404,12 +4411,7 @@ const getPerPlayerCountForChip = (chipId) => {
                     )}
 
                     <div className="w-full flex flex-col items-center justify-center mb-3"> {/* Reduced mb-4 to mb-3 */}
-                        <h1 className={`text-4xl font-bold text-center mb-1 font-outfit ${headingTextColorClass}`}>{tournamentTitle}</h1> {/* Replaced static title with state variable */}
-                        {isPro && liveSyncActive && (
-                            <span className="text-[11px] font-semibold text-green-400 mb-2 flex items-center gap-1">
-                                🔄 Live Sync Active — mirrors across your devices
-                            </span>
-                        )}
+                        <h1 className={`text-4xl font-bold text-center mb-3 font-outfit ${headingTextColorClass}`}>{tournamentTitle}</h1> {/* Replaced static title with state variable */}
 
                         <div className="flex flex-col md:flex-row items-start md:justify-center w-full gap-x-8 mb-3"> {/* Reduced mb-4 to mb-3 */}
                             {/* Tournament Clock Section */}
@@ -4624,6 +4626,14 @@ const getPerPlayerCountForChip = (chipId) => {
                                 )}
                             </button>
                         </div>
+                        {isPro && liveSyncActive && (
+                            <div className="flex justify-end mt-1.5">
+                                <span className="text-[11px] font-semibold text-green-400 flex items-center gap-1">
+                                    <span className="inline-block animate-pulse text-sm leading-none">📡</span>
+                                    Live Sync Active
+                                </span>
+                            </div>
+                        )}
                     </div>
 
                     {showSettings && (
@@ -4659,6 +4669,32 @@ const getPerPlayerCountForChip = (chipId) => {
 											This title appears on the main tournament clock.
 										  </p>
 										</div>
+
+                                        {isPro && (
+                                            <div className={`${sectionBgClass} rounded-lg p-4 flex items-center justify-between gap-4`}>
+                                                <div>
+                                                    <p className="text-sm font-semibold text-yellow-300 flex items-center gap-1.5">
+                                                        📡 Live Sync
+                                                    </p>
+                                                    <p className="text-xs text-gray-300 mt-0.5">
+                                                        When you're logged in on more than one device, keeps the running/paused state and current level mirrored between them automatically.
+                                                    </p>
+                                                </div>
+                                                <label className="flex items-center cursor-pointer shrink-0">
+                                                    <div className="relative">
+                                                        <input
+                                                            type="checkbox"
+                                                            className="sr-only"
+                                                            checked={liveSyncEnabled}
+                                                            onChange={(e) => setLiveSyncEnabled(e.target.checked)}
+                                                        />
+                                                        <div className="block bg-gray-600 w-14 h-8 rounded-full transition-colors duration-300"></div>
+                                                        <div className="dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform duration-300 transform"
+                                                            style={{ transform: liveSyncEnabled ? 'translateX(24px)' : 'translateX(0)' }}></div>
+                                                    </div>
+                                                </label>
+                                            </div>
+                                        )}
 
                                         <button
                                             onClick={() => setTournamentSettingsSubView('blinds')}
@@ -5767,6 +5803,13 @@ const getPerPlayerCountForChip = (chipId) => {
             // --- Live multi-device sync (Pro feature), same pattern as Tournament ---
             const [syncNonce, setSyncNonce] = useState(0);
             const [liveSyncActive, setLiveSyncActive] = useState(false);
+            const [liveSyncEnabled, setLiveSyncEnabled] = useState(() => {
+                const saved = localStorage.getItem('cashLiveSyncEnabled');
+                return saved !== null ? JSON.parse(saved) : true;
+            });
+            useEffect(() => {
+                localStorage.setItem('cashLiveSyncEnabled', JSON.stringify(liveSyncEnabled));
+            }, [liveSyncEnabled]);
             const lastSyncPushAtRef = useRef(0);
             const hasMountedSyncRef = useRef(false);
 
@@ -6414,7 +6457,7 @@ useEffect(() => { localStorage.setItem('showSquidGame', JSON.stringify(showSquid
             // every second, with the receiving device recalculating "remaining
             // right now" from the write's timestamp.
             useEffect(() => {
-                if (!isPro || !authUser) { setLiveSyncActive(false); return; }
+                if (!isPro || !authUser || !liveSyncEnabled) { setLiveSyncActive(false); return; }
                 if (!hasMountedSyncRef.current) { hasMountedSyncRef.current = true; return; }
                 const payload = { timeRemaining, isRunning, updatedAt: Date.now() };
                 lastSyncPushAtRef.current = payload.updatedAt;
@@ -6423,11 +6466,11 @@ useEffect(() => { localStorage.setItem('showSquidGame', JSON.stringify(showSquid
                     .then(() => setLiveSyncActive(true))
                     .catch(e => console.error('Clock sync push failed:', e));
                 // eslint-disable-next-line react-hooks/exhaustive-deps
-            }, [isRunning, syncNonce, isPro, authUser]);
+            }, [isRunning, syncNonce, isPro, authUser, liveSyncEnabled]);
 
             // Listen for clock state pushed from another device.
             useEffect(() => {
-                if (!isPro || !authUser) return;
+                if (!isPro || !authUser || !liveSyncEnabled) return;
                 const unsubscribe = window.__firebaseDb.collection('liveClockSync').doc(`${authUser.uid}_cash`)
                     .onSnapshot(snapshot => {
                         if (snapshot.metadata.hasPendingWrites) return;
@@ -6755,12 +6798,7 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
 )}
 
                     <div className="w-full flex flex-col items-center justify-center mb-3"> {/* Reduced mb-4 to mb-3 */}
-                        <h1 className={`text-4xl font-bold text-center mb-1 font-outfit ${headingTextColorClass}`}>{highHandTitle}</h1> {/* Replaced static title with state variable */}
-                        {isPro && liveSyncActive && (
-                            <span className="text-[11px] font-semibold text-green-400 mb-2 flex items-center gap-1">
-                                🔄 Live Sync Active — mirrors across your devices
-                            </span>
-                        )}
+                        <h1 className={`text-4xl font-bold text-center mb-3 font-outfit ${headingTextColorClass}`}>{highHandTitle}</h1> {/* Replaced static title with state variable */}
                         <div className="text-center mb-4 w-full"> {/* Reduced mb-6 to mb-4 */}
                             <div className={`text-6xl md:text-7xl font-sans tracking-wide ${sectionBgClass} px-4 py-1 rounded-xl shadow-inner inline-block transition-colors duration-500`}> {/* Reduced py-2 to py-1. Font size adjustment */}
                                 {formatTime(timeRemaining)}
@@ -6857,6 +6895,14 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                 )}
                             </button>
                         </div>
+                        {isPro && liveSyncActive && (
+                            <div className="flex justify-end mt-1.5">
+                                <span className="text-[11px] font-semibold text-green-400 flex items-center gap-1">
+                                    <span className="inline-block animate-pulse text-sm leading-none">📡</span>
+                                    Live Sync Active
+                                </span>
+                            </div>
+                        )}
                     </div>
 
 
@@ -6904,6 +6950,32 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                                     textSizeClass="text-xl"
                                                 />
                                             </div>
+
+                                            {isPro && (
+                                                <div className={`${sectionBgClass} rounded-lg p-4 flex items-center justify-between gap-4`}>
+                                                    <div>
+                                                        <p className="text-sm font-semibold text-yellow-300 flex items-center gap-1.5">
+                                                            📡 Live Sync
+                                                        </p>
+                                                        <p className="text-xs text-gray-300 mt-0.5">
+                                                            When you're logged in on more than one device, keeps the running/paused state mirrored between them automatically.
+                                                        </p>
+                                                    </div>
+                                                    <label className="flex items-center cursor-pointer shrink-0">
+                                                        <div className="relative">
+                                                            <input
+                                                                type="checkbox"
+                                                                className="sr-only"
+                                                                checked={liveSyncEnabled}
+                                                                onChange={(e) => setLiveSyncEnabled(e.target.checked)}
+                                                            />
+                                                            <div className="block bg-gray-600 w-14 h-8 rounded-full transition-colors duration-300"></div>
+                                                            <div className="dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform duration-300 transform"
+                                                                style={{ transform: liveSyncEnabled ? 'translateX(24px)' : 'translateX(0)' }}></div>
+                                                        </div>
+                                                    </label>
+                                                </div>
+                                            )}
                                         </div>
                                         <div className="flex flex-col space-y-4">
                                             <button onClick={() => setHighHandSettingsSubView('visual')} className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200">
