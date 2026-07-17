@@ -4688,8 +4688,8 @@ const getPerPlayerCountForChip = (chipId) => {
                                                             checked={liveSyncEnabled}
                                                             onChange={(e) => setLiveSyncEnabled(e.target.checked)}
                                                         />
-                                                        <div className="block bg-gray-600 w-14 h-8 rounded-full transition-colors duration-300"></div>
-                                                        <div className="dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform duration-300 transform"
+                                                        <div className={`block w-14 h-8 rounded-full border-2 border-gray-900/40 transition-colors duration-300 ${liveSyncEnabled ? 'bg-green-500' : 'bg-gray-800'}`}></div>
+                                                        <div className="dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full shadow-md transition-transform duration-300 transform"
                                                             style={{ transform: liveSyncEnabled ? 'translateX(24px)' : 'translateX(0)' }}></div>
                                                     </div>
                                                 </label>
@@ -6969,8 +6969,8 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                                                 checked={liveSyncEnabled}
                                                                 onChange={(e) => setLiveSyncEnabled(e.target.checked)}
                                                             />
-                                                            <div className="block bg-gray-600 w-14 h-8 rounded-full transition-colors duration-300"></div>
-                                                            <div className="dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform duration-300 transform"
+                                                            <div className={`block w-14 h-8 rounded-full border-2 border-gray-900/40 transition-colors duration-300 ${liveSyncEnabled ? 'bg-green-500' : 'bg-gray-800'}`}></div>
+                                                            <div className="dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full shadow-md transition-transform duration-300 transform"
                                                                 style={{ transform: liveSyncEnabled ? 'translateX(24px)' : 'translateX(0)' }}></div>
                                                         </div>
                                                     </label>
