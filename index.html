@@ -3383,6 +3383,10 @@ stack = Math.round(stack / roundingUnit) * roundingUnit;
                     currentLevelIndex,
                     timeRemaining,
                     isRunning,
+                    payoutStructure,
+                    numPlayers,
+                    rebuyCount,
+                    addOnCount,
                     updatedAt: Date.now(),
                 };
                 lastSyncPushAtRef.current = payload.updatedAt;
@@ -3391,7 +3395,7 @@ stack = Math.round(stack / roundingUnit) * roundingUnit;
                     .then(() => setLiveSyncActive(true))
                     .catch(e => console.error('Clock sync push failed:', e));
                 // eslint-disable-next-line react-hooks/exhaustive-deps
-            }, [isRunning, currentLevelIndex, syncNonce, isPro, authUser, liveSyncEnabled]);
+            }, [isRunning, currentLevelIndex, syncNonce, isPro, authUser, liveSyncEnabled, payoutStructure, numPlayers, rebuyCount, addOnCount]);
 
             // Effect 2c: Listen for clock state pushed from another device.
             // Firestore's snapshot.metadata.hasPendingWrites tells us whether a
@@ -3411,6 +3415,10 @@ stack = Math.round(stack / roundingUnit) * roundingUnit;
                         setCurrentLevelIndex(data.currentLevelIndex ?? 0);
                         setTimeRemaining(adjustedTime);
                         setIsRunning(!!data.isRunning);
+                        if (Array.isArray(data.payoutStructure)) setPayoutStructure(data.payoutStructure);
+                        if (typeof data.numPlayers === 'number') setNumPlayers(data.numPlayers);
+                        if (typeof data.rebuyCount === 'number') setRebuyCount(data.rebuyCount);
+                        if (typeof data.addOnCount === 'number') setAddOnCount(data.addOnCount);
                         setLiveSyncActive(true);
                     }, e => console.error('Clock sync listener error:', e));
                 return () => unsubscribe();
@@ -6492,14 +6500,31 @@ useEffect(() => { localStorage.setItem('showSquidGame', JSON.stringify(showSquid
             useEffect(() => {
                 if (!isPro || !authUser || !liveSyncEnabled) { setLiveSyncActive(false); return; }
                 if (!hasMountedSyncRef.current) { hasMountedSyncRef.current = true; return; }
-                const payload = { timeRemaining, isRunning, updatedAt: Date.now() };
+                const currentHand = Array.isArray(pokerHands) ? pokerHands.find(h => h.id === currentHighHandId) : undefined;
+                const payload = {
+                    timeRemaining,
+                    isRunning,
+                    currentHighHandId,
+                    currentHighHandData: currentHand || null,
+                    badBeatJackpotAmount,
+                    showBadBeatJackpot,
+                    sevenDeuceBounty,
+                    nitGameBounty,
+                    squidGameBounty,
+                    show7DeuceGame,
+                    showNitGame,
+                    showSquidGame,
+                    updatedAt: Date.now(),
+                };
                 lastSyncPushAtRef.current = payload.updatedAt;
                 window.__firebaseDb.collection('liveClockSync').doc(`${authUser.uid}_cash`)
                     .set(payload)
                     .then(() => setLiveSyncActive(true))
                     .catch(e => console.error('Clock sync push failed:', e));
                 // eslint-disable-next-line react-hooks/exhaustive-deps
-            }, [isRunning, syncNonce, isPro, authUser, liveSyncEnabled]);
+            }, [isRunning, syncNonce, isPro, authUser, liveSyncEnabled, currentHighHandId, pokerHands,
+                badBeatJackpotAmount, showBadBeatJackpot, sevenDeuceBounty, nitGameBounty, squidGameBounty,
+                show7DeuceGame, showNitGame, showSquidGame]);
 
             // Listen for clock state pushed from another device.
             useEffect(() => {
@@ -6515,6 +6540,28 @@ useEffect(() => { localStorage.setItem('showSquidGame', JSON.stringify(showSquid
 
                         setTimeRemaining(adjustedTime);
                         setIsRunning(!!data.isRunning);
+
+                        if ('currentHighHandId' in data) {
+                            setCurrentHighHandId(data.currentHighHandId);
+                            // Make sure the hand is actually present locally so it
+                            // displays correctly, even if the regular (slower)
+                            // settings sync hasn't caught up with this hand yet.
+                            if (data.currentHighHandData && data.currentHighHandId) {
+                                setPokerHands(prev => {
+                                    const exists = prev.some(h => h.id === data.currentHighHandId);
+                                    return exists ? prev : [...prev, data.currentHighHandData];
+                                });
+                            }
+                        }
+                        if (typeof data.badBeatJackpotAmount === 'number') setBadBeatJackpotAmount(data.badBeatJackpotAmount);
+                        if (typeof data.showBadBeatJackpot === 'boolean') setShowBadBeatJackpot(data.showBadBeatJackpot);
+                        if ('sevenDeuceBounty' in data) setSevenDeuceBounty(data.sevenDeuceBounty);
+                        if ('nitGameBounty' in data) setNitGameBounty(data.nitGameBounty);
+                        if ('squidGameBounty' in data) setSquidGameBounty(data.squidGameBounty);
+                        if (typeof data.show7DeuceGame === 'boolean') setShow7DeuceGame(data.show7DeuceGame);
+                        if (typeof data.showNitGame === 'boolean') setShowNitGame(data.showNitGame);
+                        if (typeof data.showSquidGame === 'boolean') setShowSquidGame(data.showSquidGame);
+
                         setLiveSyncActive(true);
                     }, e => console.error('Clock sync listener error:', e));
                 return () => unsubscribe();
