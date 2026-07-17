@@ -812,8 +812,36 @@
                                 {user ? (
                                     <>
                                         <h2 className="text-lg font-bold mb-2">Account</h2>
-                                        <p className="text-sm mb-4 opacity-80">Signed in as {user.email}</p>
+                                        <p className="text-sm mb-2 opacity-80">Signed in as {user.email}</p>
+
+                                        <div className="flex items-center justify-between mb-3 px-3 py-2 rounded-md bg-gray-700/50">
+                                            <span className="text-sm font-medium">Plan</span>
+                                            <span className={`text-xs font-bold uppercase px-2 py-1 rounded-full flex items-center gap-1 ${userTier === 'pro' ? 'bg-blue-600 text-white' : 'bg-gray-600 text-gray-200'}`}>
+                                                {userTier === 'pro' ? (
+                                                    <>
+                                                        <svg viewBox="0 0 32 32" className="w-3.5 h-3.5 shrink-0">
+                                                            <circle cx="16" cy="16" r="14" fill="#facc15" stroke="#ffffff" strokeWidth="2" />
+                                                            <circle cx="16" cy="16" r="9.5" fill="none" stroke="#ffffff" strokeWidth="2" strokeDasharray="3.2 3.2" />
+                                                            <circle cx="16" cy="16" r="4" fill="#ffffff" />
+                                                        </svg>
+                                                        Pro
+                                                    </>
+                                                ) : '🆓 Free'}
+                                            </span>
+                                        </div>
+
                                         <p className="text-xs mb-4 opacity-60">Your settings sync automatically to your account and follow you to any device you log into. All of it is encrypted in transit and at rest, and only visible to you.</p>
+
+                                        {userTier !== 'pro' && (
+                                            <button onClick={() => alert('Upgrading to Pro is coming soon!')} className="w-full py-2 rounded-md bg-gradient-to-r from-yellow-500 to-orange-500 hover:opacity-90 text-white font-semibold mb-2 flex items-center justify-center gap-1.5">
+                                                <svg viewBox="0 0 32 32" className="w-4 h-4 shrink-0">
+                                                    <circle cx="16" cy="16" r="14" fill="#ffffff" stroke="#7c2d12" strokeWidth="2" />
+                                                    <circle cx="16" cy="16" r="9.5" fill="none" stroke="#7c2d12" strokeWidth="2" strokeDasharray="3.2 3.2" />
+                                                    <circle cx="16" cy="16" r="4" fill="#facc15" />
+                                                </svg>
+                                                Upgrade to Pro
+                                            </button>
+                                        )}
 
                                         {userTier !== 'pro' && trialEndsAt && trialEndsAt > Date.now() && (
                                             <p className="text-xs text-center mb-3 px-3 py-2 rounded-md bg-blue-600/20 border border-blue-500/40">
@@ -821,8 +849,13 @@
                                             </p>
                                         )}
                                         {userTier !== 'pro' && !trialUsed && (
-                                            <button onClick={onStartTrial} className="w-full py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white font-medium mb-2">
-                                                ⭐ Start 7-Day Free Pro Trial
+                                            <button onClick={onStartTrial} className="w-full py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white font-medium mb-2 flex items-center justify-center gap-1.5">
+                                                <svg viewBox="0 0 32 32" className="w-4 h-4 shrink-0">
+                                                    <circle cx="16" cy="16" r="14" fill="#ffffff" stroke="#1e3a8a" strokeWidth="2" />
+                                                    <circle cx="16" cy="16" r="9.5" fill="none" stroke="#1e3a8a" strokeWidth="2" strokeDasharray="3.2 3.2" />
+                                                    <circle cx="16" cy="16" r="4" fill="#3b82f6" />
+                                                </svg>
+                                                Start 7-Day Free Pro Trial
                                             </button>
                                         )}
                                         {userTier !== 'pro' && trialUsed && !(trialEndsAt && trialEndsAt > Date.now()) && (
@@ -5140,7 +5173,7 @@ const getPerPlayerCountForChip = (chipId) => {
 												checked={useAntes}
 												onChange={(e) => setUseAntes(e.target.checked)}
 											  />
-											  <div className="block bg-gray-600 w-14 h-8 rounded-full"></div>
+											  <div className={`block w-14 h-8 rounded-full border-2 border-gray-900/40 transition-colors duration-300 ${useAntes ? 'bg-green-500' : 'bg-gray-800'}`}></div>
 											  <div
 												className="dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform duration-300 transform"
 												style={{ transform: useAntes ? 'translateX(24px)' : 'translateX(0)' }}
@@ -5334,7 +5367,7 @@ const getPerPlayerCountForChip = (chipId) => {
                                                             checked={showChipDisplay}
                                                             onChange={(e) => setShowChipDisplay(e.target.checked)}
                                                         />
-                                                        <div className="block bg-gray-600 w-14 h-8 rounded-full transition-colors duration-300"></div>
+                                                        <div className={`block w-14 h-8 rounded-full border-2 border-gray-900/40 transition-colors duration-300 ${showChipDisplay ? 'bg-green-500' : 'bg-gray-800'}`}></div>
                                                         <div className="dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform duration-300 transform"
                                                             style={{ transform: showChipDisplay ? 'translateX(24px)' : 'translateX(0)' }}></div>
                                                     </div>
@@ -5672,7 +5705,7 @@ const getPerPlayerCountForChip = (chipId) => {
                                                             checked={showLogo}
                                                             onChange={(e) => setShowLogo(e.target.checked)}
                                                         />
-                                                        <div className="block bg-gray-600 w-14 h-8 rounded-full transition-colors duration-300"></div>
+                                                        <div className={`block w-14 h-8 rounded-full border-2 border-gray-900/40 transition-colors duration-300 ${showLogo ? 'bg-green-500' : 'bg-gray-800'}`}></div>
                                                         <div className="dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform duration-300 transform"
                                                             style={{ transform: showLogo ? 'translateX(24px)' : 'translateX(0)' }}></div>
                                                     </div>
@@ -7132,7 +7165,7 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                                             checked={showLogo}
                                                             onChange={(e) => setShowLogo(e.target.checked)}
                                                         />
-                                                        <div className="block bg-gray-600 w-14 h-8 rounded-full transition-colors duration-300"></div>
+                                                        <div className={`block w-14 h-8 rounded-full border-2 border-gray-900/40 transition-colors duration-300 ${showLogo ? 'bg-green-500' : 'bg-gray-800'}`}></div>
                                                         <div className="dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform duration-300 transform"
                                                             style={{ transform: showLogo ? 'translateX(24px)' : 'translateX(0)' }}></div>
                                                     </div>
@@ -7282,7 +7315,7 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                                             checked={showBadBeatJackpot}
                                                             onChange={(e) => setShowBadBeatJackpot(e.target.checked)}
                                                         />
-                                                        <div className="block bg-gray-600 w-14 h-8 rounded-full transition-colors duration-300"></div>
+                                                        <div className={`block w-14 h-8 rounded-full border-2 border-gray-900/40 transition-colors duration-300 ${showBadBeatJackpot ? 'bg-green-500' : 'bg-gray-800'}`}></div>
                                                         <div className="dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform duration-300 transform"
                                                             style={{ transform: showBadBeatJackpot ? 'translateX(24px)' : 'translateX(0)' }}></div>
                                                     </div>
@@ -7331,7 +7364,7 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
               checked={show7DeuceGame}
               onChange={(e) => setShow7DeuceGame(e.target.checked)}
             />
-            <div className="block bg-gray-600 w-14 h-8 rounded-full transition-colors duration-300"></div>
+            <div className={`block w-14 h-8 rounded-full border-2 border-gray-900/40 transition-colors duration-300 ${show7DeuceGame ? 'bg-green-500' : 'bg-gray-800'}`}></div>
             <div
               className="dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform duration-300 transform"
               style={{ transform: show7DeuceGame ? 'translateX(24px)' : 'translateX(0)' }}
@@ -7363,7 +7396,7 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
               checked={showNitGame}
               onChange={(e) => setShowNitGame(e.target.checked)}
             />
-            <div className="block bg-gray-600 w-14 h-8 rounded-full transition-colors duration-300"></div>
+            <div className={`block w-14 h-8 rounded-full border-2 border-gray-900/40 transition-colors duration-300 ${showNitGame ? 'bg-green-500' : 'bg-gray-800'}`}></div>
             <div
               className="dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform duration-300 transform"
               style={{ transform: showNitGame ? 'translateX(24px)' : 'translateX(0)' }}
@@ -7395,7 +7428,7 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
               checked={showSquidGame}
               onChange={(e) => setShowSquidGame(e.target.checked)}
             />
-            <div className="block bg-gray-600 w-14 h-8 rounded-full transition-colors duration-300"></div>
+            <div className={`block w-14 h-8 rounded-full border-2 border-gray-900/40 transition-colors duration-300 ${showSquidGame ? 'bg-green-500' : 'bg-gray-800'}`}></div>
             <div
               className="dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform duration-300 transform"
               style={{ transform: showSquidGame ? 'translateX(24px)' : 'translateX(0)' }}
@@ -7449,7 +7482,7 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                                             checked={showChipDisplay}
                                                             onChange={(e) => setShowChipDisplay(e.target.checked)}
                                                         />
-                                                        <div className="block bg-gray-600 w-14 h-8 rounded-full transition-colors duration-300"></div>
+                                                        <div className={`block w-14 h-8 rounded-full border-2 border-gray-900/40 transition-colors duration-300 ${showChipDisplay ? 'bg-green-500' : 'bg-gray-800'}`}></div>
                                                         <div className="dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform duration-300 transform"
                                                             style={{ transform: showChipDisplay ? 'translateX(24px)' : 'translateX(0)' }}></div>
                                                     </div>
