@@ -47,15 +47,6 @@
         button {
           min-height: 44px;
         }
-        /* CSS zoom has a known bug on touchscreens: the visual position of
-           content can drift away from where taps actually register, especially
-           across orientation changes -- showing up as "dead zones" that don't
-           respond to touch. The zoom control was only ever meant to help on
-           desktop monitors (where this bug doesn't happen), so it's switched
-           off entirely on touch devices instead. */
-        .zoom-scale-container {
-          zoom: 1 !important;
-        }
       }
 
       /* Lets the Tournament view's "inner box" color/transparency setting
@@ -8197,11 +8188,8 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
   console.log("App component rendering");
   const [currentView, setCurrentView] = useState(() => localStorage.getItem('pokerAppCurrentView') || 'home');
   const [visitedViews, setVisitedViews] = useState(() => new Set([localStorage.getItem('pokerAppCurrentView') || 'home']));
-  const [uiScale, setUiScale] = useState(() => parseFloat(localStorage.getItem('uiScale')) || 1);
+  const [uiScale, setUiScale] = useState(1); // always starts at 100% -- deliberately not persisted
 
-  useEffect(() => {
-    localStorage.setItem('uiScale', uiScale.toString());
-  }, [uiScale]);
   const [theme, setTheme] = useState('dark');
   const [authUser, setAuthUser] = useState(() => window.__currentUser);
   const [userTier, setUserTier] = useState(() => window.__userTier);
@@ -8366,7 +8354,8 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
       <div
         className={`zoom-scale-container min-h-screen flex flex-col items-center font-inter transition-colors duration-500 ${appBgClass} p-4`}
         style={{
-          zoom: uiScale,
+          transform: `scale(${uiScale})`,
+          transformOrigin: 'top center',
           minHeight: '100dvh',
           display: (currentView === 'invites' || currentView === 'tracking' || currentView === 'admin') ? 'none' : 'flex'
         }}
