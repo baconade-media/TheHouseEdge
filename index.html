@@ -1307,6 +1307,78 @@
         };
 
 
+        // --- Alarm sound system ---
+        // Generates tones directly via the Web Audio API instead of relying on
+        // external hosted files -- guarantees every option always works, with
+        // no risk of a broken link or slow load. The original bell sound is
+        // kept as the default option since it's already proven reliable.
+        let __sharedAudioCtx = null;
+        const getAudioCtx = () => {
+            if (!__sharedAudioCtx) {
+                const Ctx = window.AudioContext || window.webkitAudioContext;
+                __sharedAudioCtx = new Ctx();
+            }
+            if (__sharedAudioCtx.state === 'suspended') __sharedAudioCtx.resume();
+            return __sharedAudioCtx;
+        };
+
+        const playTone = (frequency, duration, type = 'sine', delay = 0, volume = 0.35) => {
+            const ctx = getAudioCtx();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = type;
+            osc.frequency.value = frequency;
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            const startTime = ctx.currentTime + delay;
+            gain.gain.setValueAtTime(0, startTime);
+            gain.gain.linearRampToValueAtTime(volume, startTime + 0.02);
+            gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+            osc.start(startTime);
+            osc.stop(startTime + duration + 0.05);
+        };
+
+        const ALARM_SOUNDS = {
+            classicBell: {
+                name: 'Classic Bell',
+                play: (audioEl) => { if (audioEl) { audioEl.currentTime = 0; audioEl.play().catch(() => {}); } },
+            },
+            softDing: {
+                name: 'Soft Ding',
+                play: () => playTone(880, 0.9, 'sine'),
+            },
+            doubleBell: {
+                name: 'Double Bell',
+                play: () => { playTone(900, 0.35, 'sine'); playTone(900, 0.35, 'sine', 0.28); },
+            },
+            tripleChime: {
+                name: 'Triple Chime',
+                play: () => { playTone(600, 0.3, 'sine'); playTone(800, 0.3, 'sine', 0.2); playTone(1000, 0.5, 'sine', 0.4); },
+            },
+            alertBell: {
+                name: 'Alert Bell',
+                play: () => {
+                    for (let i = 0; i < 3; i++) {
+                        playTone(1000, 0.18, 'triangle', i * 0.32);
+                        playTone(700, 0.18, 'triangle', i * 0.32 + 0.16);
+                    }
+                },
+            },
+            buzzer: {
+                name: 'Buzzer',
+                play: () => { playTone(300, 0.5, 'square', 0, 0.2); playTone(300, 0.5, 'square', 0.55, 0.2); },
+            },
+        };
+
+        const playAlarmSound = (soundKey, audioEl) => {
+            const sound = ALARM_SOUNDS[soundKey] || ALARM_SOUNDS.classicBell;
+            try {
+                sound.play(audioEl);
+            } catch (e) {
+                console.error('Could not play alarm sound:', e);
+            }
+        };
+
         const WheelPicker = ({ value, onChange, min, max, step = 1, values: customValues, formatValue, width = '5rem' }) => {
             const wheelRef = useRef(null);
             const ITEM_HEIGHT = 36;
@@ -3093,6 +3165,16 @@
             const audioRef = useRef(null); // For sound effects
             const prevLevelIndex = useRef(currentLevelIndex); // Ref to track actual level changes
 
+            const [alarmSoundEnabled, setAlarmSoundEnabled] = useState(() => {
+                const saved = localStorage.getItem('tournamentAlarmSoundEnabled');
+                return saved !== null ? JSON.parse(saved) : true;
+            });
+            const [selectedAlarmSound, setSelectedAlarmSound] = useState(() => localStorage.getItem('tournamentAlarmSound') || 'classicBell');
+            useEffect(() => {
+                localStorage.setItem('tournamentAlarmSoundEnabled', JSON.stringify(alarmSoundEnabled));
+                localStorage.setItem('tournamentAlarmSound', selectedAlarmSound);
+            }, [alarmSoundEnabled, selectedAlarmSound]);
+
 
             // Load levels and payout structure from localStorage on mount
             useEffect(() => {
@@ -3344,8 +3426,8 @@ stack = Math.round(stack / roundingUnit) * roundingUnit;
                         setTimeRemaining(prev => {
                             if (prev <= 1) { // Time runs out
                                 clearInterval(timerIntervalRef.current);
-                                if (audioRef.current) {
-                                    audioRef.current.play();
+                                if (alarmSoundEnabled) {
+                                    playAlarmSound(selectedAlarmSound, audioRef.current);
                                 }
                                 // If current level is a break, pause the timer instead of auto-advancing
                                 if (currentLevel && currentLevel.isBreak) {
@@ -4736,6 +4818,46 @@ const getPerPlayerCountForChip = (chipId) => {
                                                 </label>
                                             </div>
                                         )}
+
+                                        <div className={`${sectionBgClass} rounded-lg p-4`}>
+                                            <div className="flex items-center justify-between gap-4 mb-3">
+                                                <p className="text-sm font-semibold text-yellow-300 flex items-center gap-1.5">
+                                                    🔔 Level-End Sound
+                                                </p>
+                                                <label className="flex items-center cursor-pointer shrink-0">
+                                                    <div className="relative">
+                                                        <input
+                                                            type="checkbox"
+                                                            className="sr-only"
+                                                            checked={alarmSoundEnabled}
+                                                            onChange={(e) => setAlarmSoundEnabled(e.target.checked)}
+                                                        />
+                                                        <div className={`block w-14 h-8 rounded-full border-2 border-gray-900/40 transition-colors duration-300 ${alarmSoundEnabled ? 'bg-green-500' : 'bg-gray-800'}`}></div>
+                                                        <div className="dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full shadow-md transition-transform duration-300 transform"
+                                                            style={{ transform: alarmSoundEnabled ? 'translateX(24px)' : 'translateX(0)' }}></div>
+                                                    </div>
+                                                </label>
+                                            </div>
+                                            {alarmSoundEnabled && (
+                                                <div className="flex gap-2">
+                                                    <select
+                                                        value={selectedAlarmSound}
+                                                        onChange={(e) => setSelectedAlarmSound(e.target.value)}
+                                                        className={`flex-grow px-3 py-2 rounded-md ${inputBgClass} ${inputBorderClass} border ${subtextColorClass} text-sm`}
+                                                    >
+                                                        {Object.entries(ALARM_SOUNDS).map(([key, s]) => (
+                                                            <option key={key} value={key}>{s.name}</option>
+                                                        ))}
+                                                    </select>
+                                                    <button
+                                                        onClick={() => playAlarmSound(selectedAlarmSound, audioRef.current)}
+                                                        className="px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold whitespace-nowrap"
+                                                    >
+                                                        ▶ Test
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
 
                                         <button
                                             onClick={() => setTournamentSettingsSubView('blinds')}
@@ -6257,6 +6379,17 @@ const [squidGameBounty, setSquidGameBounty] = useState('');
 
             const timerRef = useRef(null);
             const audioRef = useRef(null); // For sound effects
+
+            const [alarmSoundEnabled, setAlarmSoundEnabled] = useState(() => {
+                const saved = localStorage.getItem('cashAlarmSoundEnabled');
+                return saved !== null ? JSON.parse(saved) : true;
+            });
+            const [selectedAlarmSound, setSelectedAlarmSound] = useState(() => localStorage.getItem('cashAlarmSound') || 'classicBell');
+            useEffect(() => {
+                localStorage.setItem('cashAlarmSoundEnabled', JSON.stringify(alarmSoundEnabled));
+                localStorage.setItem('cashAlarmSound', selectedAlarmSound);
+            }, [alarmSoundEnabled, selectedAlarmSound]);
+
             const ranks = ['A', 'K', 'Q', 'J', 'T', '9', '8', '7', '6', '5', '4', '3', '2'];
             // Updated: Define a map for suit display characters and their colors for the buttons
             const suitDisplayInfo = {
@@ -6482,16 +6615,25 @@ useEffect(() => { localStorage.setItem('showSquidGame', JSON.stringify(showSquid
                 } catch (error) { /* console.error("Fullscreen API error:", error); */ }
             };
 
+            const hasPlayedAlarmRef = useRef(false);
+
             // Timer interval logic
             useEffect(() => {
                 if (isRunning && timeRemaining > 0) {
+                    hasPlayedAlarmRef.current = false; // reset so the next zero-crossing can play again
                     timerRef.current = setInterval(() => setTimeRemaining((prevTime) => prevTime - 1), 1000);
                 } else if (timeRemaining === 0) {
                     clearInterval(timerRef.current);
                     setIsRunning(false);
+                    if (!hasPlayedAlarmRef.current) {
+                        hasPlayedAlarmRef.current = true;
+                        if (alarmSoundEnabled) {
+                            playAlarmSound(selectedAlarmSound, audioRef.current);
+                        }
+                    }
                 }
                 return () => clearInterval(timerRef.current);
-            }, [isRunning, timeRemaining]);
+            }, [isRunning, timeRemaining, alarmSoundEnabled, selectedAlarmSound]);
 
             // Push clock state to Firestore on start/pause/reset (Pro only) --
             // same approach as Tournament: only on discrete transitions, not
@@ -7056,6 +7198,46 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                                     </label>
                                                 </div>
                                             )}
+
+                                            <div className={`${sectionBgClass} rounded-lg p-4`}>
+                                                <div className="flex items-center justify-between gap-4 mb-3">
+                                                    <p className="text-sm font-semibold text-yellow-300 flex items-center gap-1.5">
+                                                        🔔 Timer-End Sound
+                                                    </p>
+                                                    <label className="flex items-center cursor-pointer shrink-0">
+                                                        <div className="relative">
+                                                            <input
+                                                                type="checkbox"
+                                                                className="sr-only"
+                                                                checked={alarmSoundEnabled}
+                                                                onChange={(e) => setAlarmSoundEnabled(e.target.checked)}
+                                                            />
+                                                            <div className={`block w-14 h-8 rounded-full border-2 border-gray-900/40 transition-colors duration-300 ${alarmSoundEnabled ? 'bg-green-500' : 'bg-gray-800'}`}></div>
+                                                            <div className="dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full shadow-md transition-transform duration-300 transform"
+                                                                style={{ transform: alarmSoundEnabled ? 'translateX(24px)' : 'translateX(0)' }}></div>
+                                                        </div>
+                                                    </label>
+                                                </div>
+                                                {alarmSoundEnabled && (
+                                                    <div className="flex gap-2">
+                                                        <select
+                                                            value={selectedAlarmSound}
+                                                            onChange={(e) => setSelectedAlarmSound(e.target.value)}
+                                                            className={`flex-grow px-3 py-2 rounded-md ${inputBgClass} ${inputBorderClass} border ${subtextColorClass} text-sm`}
+                                                        >
+                                                            {Object.entries(ALARM_SOUNDS).map(([key, s]) => (
+                                                                <option key={key} value={key}>{s.name}</option>
+                                                            ))}
+                                                        </select>
+                                                        <button
+                                                            onClick={() => playAlarmSound(selectedAlarmSound, audioRef.current)}
+                                                            className="px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold whitespace-nowrap"
+                                                        >
+                                                            ▶ Test
+                                                        </button>
+                                                    </div>
+                                                )}
+                                            </div>
                                         </div>
                                         <div className="flex flex-col space-y-4">
                                             <button onClick={() => setHighHandSettingsSubView('visual')} className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200">
