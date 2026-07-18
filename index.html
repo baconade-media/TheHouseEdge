@@ -6437,7 +6437,10 @@ const [squidGameBounty, setSquidGameBounty] = useState('');
             // Load settings and hands from localStorage
             useEffect(() => {
                 const savedDuration = localStorage.getItem('pokerTimerDuration');
-                if (savedDuration) setInputDuration(parseInt(savedDuration));
+                if (savedDuration) {
+                    setInputDuration(parseInt(savedDuration));
+                    setTimeRemaining(parseInt(savedDuration) * 60); // start the clock at the user's actual saved duration, not a hardcoded default
+                }
                 let loadedPokerHands = [];
                 try {
                     const savedHands = localStorage.getItem('pokerHands');
