@@ -397,6 +397,20 @@
                 }
             };
 
+            const endTrial = async (member) => {
+                const pastTimestamp = Date.now() - 1000; // immediately in the past, so it's no longer active
+                setBusyId(member.id);
+                try {
+                    await window.__firebaseDb.collection('userSettings').doc(member.id).set({ trialEndsAt: pastTimestamp }, { merge: true });
+                    setMembers(prev => prev.map(m => m.id === member.id ? { ...m, trialEndsAt: pastTimestamp } : m));
+                } catch (e) {
+                    console.error('Could not end trial:', e);
+                    alert("Couldn't end that member's trial.");
+                } finally {
+                    setBusyId(null);
+                }
+            };
+
             const proCount = members ? members.filter(m => m.tier === 'pro').length : 0;
             const freeCount = members ? members.filter(m => m.tier !== 'pro').length : 0;
             const trialCount = members ? members.filter(m => m.trialEndsAt && m.trialEndsAt > Date.now()).length : 0;
@@ -506,6 +520,15 @@
                                                     className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-gray-600 hover:bg-gray-500 disabled:opacity-50"
                                                 >
                                                     {busyId === member.id ? '…' : (member.trialUsed ? 'Restart Trial' : 'Grant Trial')}
+                                                </button>
+                                            )}
+                                            {member.tier !== 'pro' && onTrial && (
+                                                <button
+                                                    onClick={() => endTrial(member)}
+                                                    disabled={busyId === member.id}
+                                                    className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-600/80 hover:bg-red-600 disabled:opacity-50"
+                                                >
+                                                    {busyId === member.id ? '…' : 'End Trial'}
                                                 </button>
                                             )}
                                             <button
