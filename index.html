@@ -418,13 +418,6 @@
 
             return (
                 <div className="min-h-screen flex flex-col items-center bg-gray-900 text-white p-4" style={{ minHeight: '100dvh' }}>
-                    <button
-                        onClick={onBackToHome}
-                        className="fixed z-30 px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
-                        style={{ top: 'max(0.75rem, env(safe-area-inset-top))', left: 'max(0.75rem, env(safe-area-inset-left))' }}
-                    >
-                        &larr; Home
-                    </button>
                     <div className="bg-gray-800 p-5 sm:p-6 rounded-2xl shadow-2xl w-[92vw] max-w-[900px] mt-16 mb-8" style={{ margin: 'auto' }}>
                         <h2 className="text-3xl font-black text-center mb-1 text-blue-400">Admin Dashboard</h2>
 
@@ -1601,13 +1594,6 @@
 
             return (
                 <div style={{ position: 'fixed', inset: 0, zIndex: 30 }}>
-                    <button
-                        onClick={onBackToHome}
-                        className="fixed z-30 px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
-                        style={{ top: 'max(0.75rem, env(safe-area-inset-top))', left: 'max(0.75rem, env(safe-area-inset-left))' }}
-                    >
-                        &larr; Home
-                    </button>
                     <iframe
                         srcDoc={TRACKER_HTML}
                         title="Poker Logbook"
@@ -2267,13 +2253,6 @@
                     className={`bg-slate-800 p-5 sm:p-6 rounded-2xl shadow-2xl w-[92vw] max-w-[1400px] flex flex-col transition-colors duration-500 relative`}
                     style={{ margin: 'auto' }}
                 >
-                    <button
-                        onClick={onBackToHome}
-                        className="fixed z-30 px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
-                        style={{ top: 'max(0.75rem, env(safe-area-inset-top))', left: 'max(0.75rem, env(safe-area-inset-left))' }}
-                    >
-                        &larr; Home
-                    </button>
 
                     <div className="flex items-center justify-center gap-2 mb-6 mt-12 sm:mt-2">
                         <svg viewBox="0 0 32 32" className="w-8 h-8 shrink-0" style={{ filter: 'drop-shadow(0 4px 6px rgba(30,64,175,0.3))' }}>
@@ -4499,14 +4478,6 @@ const getPerPlayerCountForChip = (chipId) => {
                             : (tournamentSectionBg || (theme === 'dark' ? '#4b5563' : '#e5e7eb')),
                     }}
                 >
-                    {/* Back to Home Button */}
-                    <button
-                        onClick={onBackToHome}
-                        className="fixed z-30 px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
-                        style={{ top: 'max(0.75rem, env(safe-area-inset-top))', left: 'max(0.75rem, env(safe-area-inset-left))' }}
-                    >
-                        &larr; Home
-                    </button>
 
                     {showLogo && (
                         <img
@@ -6923,14 +6894,6 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                             : (cashSectionBg || (theme === 'dark' ? '#4b5563' : '#e5e7eb')),
                     }}
                 >
-                    {/* Back to Home Button */}
-                    <button
-                        onClick={onBackToHome}
-                        className="fixed z-30 px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
-                        style={{ top: 'max(0.75rem, env(safe-area-inset-top))', left: 'max(0.75rem, env(safe-area-inset-left))' }}
-                    >
-                        &larr; Home
-                    </button>
 
                     {showLogo && (
                         <img
@@ -8067,7 +8030,7 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                                         <p className={`${placeholderColorClass} text-center`}>No hands added yet.</p>
                                     ) : (
                                         <ul className="space-y-3">
-                                            {pokerHands.map((hand) => (
+                                            {[...pokerHands].reverse().map((hand) => (
                                                 <li key={hand.id} className="flex flex-col sm:flex-row items-center sm:justify-between p-3 rounded-md bg-gray-500 bg-opacity-20">
                                                     <div className="flex-grow text-center sm:text-left mb-2 sm:mb-0">
                                                         <p className={`font-semibold ${subtextColorClass}`}>{hand.owner}: <span className="font-normal">{hand.type}</span></p>
@@ -8351,6 +8314,13 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
         trialUsed={trialUsed}
         onStartTrial={startTrial}
       />
+      <button
+        onClick={() => goToView('home')}
+        className={`fixed z-30 px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white font-semibold rounded-lg shadow-md transition-all duration-200 ${currentView === 'home' ? 'hidden' : ''}`}
+        style={{ top: 'max(0.75rem, env(safe-area-inset-top))', left: 'max(0.75rem, env(safe-area-inset-left))' }}
+      >
+        &larr; Home
+      </button>
       <div
         className={`zoom-scale-container min-h-screen flex flex-col items-center font-inter transition-colors duration-500 ${appBgClass} p-4`}
         style={{
