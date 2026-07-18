@@ -2788,7 +2788,36 @@
          * @param {string} props.headingTextColorClass - Tailwind class for heading text color.
          * @param {string} props.mainCardBgClass - Tailwind class for main card background.
          */
-        const HomeView = ({ onSelectMode, theme, headingTextColorClass, mainCardBgClass }) => {
+        // Shared "this is a Pro feature" modal -- used everywhere a Free user
+        // taps into something gated, so the upsell message and styling stays
+        // consistent no matter which feature triggered it.
+        const ProFeatureModal = ({ featureName, onClose }) => (
+            <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+                <div className="w-full max-w-sm rounded-2xl shadow-2xl p-6 bg-gray-800 text-white" onClick={(e) => e.stopPropagation()}>
+                    <div className="text-center mb-4">
+                        <div className="text-4xl mb-2">🔒</div>
+                        <h3 className="text-xl font-bold mb-2">{featureName} is a Pro Feature</h3>
+                        <p className="text-sm opacity-70">Upgrade to Pro to unlock {featureName}, and everything else Pro includes.</p>
+                    </div>
+                    <button
+                        onClick={() => alert('Upgrading to Pro is coming soon!')}
+                        className="w-full py-3 rounded-md bg-gradient-to-r from-yellow-500 to-orange-500 hover:opacity-90 text-white font-semibold mb-2 flex items-center justify-center gap-2"
+                    >
+                        <svg viewBox="0 0 32 32" className="w-4 h-4 shrink-0">
+                            <circle cx="16" cy="16" r="14" fill="#ffffff" stroke="#7c2d12" strokeWidth="2" />
+                            <circle cx="16" cy="16" r="9.5" fill="none" stroke="#7c2d12" strokeWidth="2" strokeDasharray="3.2 3.2" />
+                            <circle cx="16" cy="16" r="4" fill="#facc15" />
+                        </svg>
+                        Upgrade to Pro
+                    </button>
+                    <button onClick={onClose} className="w-full py-2 rounded-md border border-gray-600 text-sm">
+                        Maybe Later
+                    </button>
+                </div>
+            </div>
+        );
+
+        const HomeView = ({ onSelectMode, theme, headingTextColorClass, mainCardBgClass, isPro }) => {
             console.log("HomeView component rendering");
             // URL for the image to display above the selection box
             const imageUrl = "https://i.imgur.com/bCHijGi.png"; // Updated logo URL
@@ -2800,8 +2829,8 @@
                 house: {
                     title: 'The House',
                     options: [
-                        { mode: 'tracking', label: 'Logbook', color: 'bg-blue-600 hover:bg-blue-700' },
-                        { mode: 'invites', label: 'Invites', color: 'bg-blue-600 hover:bg-blue-700' },
+                        { mode: 'tracking', label: 'Logbook', color: 'bg-blue-600 hover:bg-blue-700', proOnly: true },
+                        { mode: 'invites', label: 'Invites', color: 'bg-blue-600 hover:bg-blue-700', proOnly: true },
                     ]
                 },
                 edge: {
@@ -2813,9 +2842,15 @@
                 }
             };
 
-            const handleSelect = (mode) => {
+            const [lockedFeatureName, setLockedFeatureName] = useState(null);
+
+            const handleSelect = (opt) => {
+                if (opt.proOnly && !isPro) {
+                    setLockedFeatureName(opt.label);
+                    return;
+                }
                 setActiveGroup(null);
-                onSelectMode(mode);
+                onSelectMode(opt.mode);
             };
 
             return (
@@ -2853,15 +2888,18 @@
                             >
                                 <h3 className="text-xl font-bold text-center mb-5">{groups[activeGroup].title}</h3>
                                 <div className="flex flex-col space-y-3">
-                                    {groups[activeGroup].options.map(opt => (
-                                        <button
-                                            key={opt.mode}
-                                            onClick={() => handleSelect(opt.mode)}
-                                            className={`w-full px-6 py-3 ${opt.color} text-white font-semibold text-xl rounded-lg shadow-md transition-all duration-200 transform hover:scale-105`}
-                                        >
-                                            {opt.label}
-                                        </button>
-                                    ))}
+                                    {groups[activeGroup].options.map(opt => {
+                                        const locked = opt.proOnly && !isPro;
+                                        return (
+                                            <button
+                                                key={opt.mode}
+                                                onClick={() => handleSelect(opt)}
+                                                className={`w-full px-6 py-3 text-white font-semibold text-xl rounded-lg shadow-md transition-all duration-200 transform hover:scale-105 ${locked ? 'bg-gray-500 hover:bg-gray-500 opacity-70' : opt.color}`}
+                                            >
+                                                {opt.label}{locked && <span className="block text-xs font-normal mt-0.5">(Pro Feature)</span>}
+                                            </button>
+                                        );
+                                    })}
                                 </div>
                                 <button
                                     onClick={() => setActiveGroup(null)}
@@ -2872,6 +2910,10 @@
                             </div>
                         </div>
                     )}
+
+                    {lockedFeatureName && (
+                        <ProFeatureModal featureName={lockedFeatureName} onClose={() => setLockedFeatureName(null)} />
+                    )}
                 </div>
             );
         };
@@ -2879,6 +2921,7 @@
         // TournamentClockView: All states, effects, and functions specific to the Tournament Clock
         const TournamentClockView = ({ theme, appBgClass, mainCardBgClass, sectionBgClass, inputBgClass, inputBorderClass, subtextColorClass, placeholderColorClass, headingTextColorClass, onBackToHome, onThemeChange, uiScale, onZoomChange, isPro, authUser }) => {
             const [showSettings, setShowSettings] = useState(false);
+            const [lockedFeatureName, setLockedFeatureName] = useState(null);
             const [tournamentSettingsSubView, setTournamentSettingsSubView] = useState('menu');			// 'menu', 'blinds', 'payouts', 'visual', 'chipSettings'
 			const [tempPlayersRange, setTempPlayersRange] = useState(null);
 			const [targetTournamentHours, setTargetTournamentHours] = useState(5);
@@ -4834,10 +4877,10 @@ const getPerPlayerCountForChip = (chipId) => {
                                             Payout Settings
                                         </button>
                                         <button
-                                            onClick={() => setTournamentSettingsSubView('chipSettings')}
-                                            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
+                                            onClick={() => { if (isPro) { setTournamentSettingsSubView('chipSettings'); } else { setLockedFeatureName('Chip Distribution Calculator'); } }}
+                                            className={`px-6 py-3 text-white font-semibold rounded-lg shadow-md transition-all duration-200 ${isPro ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-500 opacity-70'}`}
                                         >
-                                            Chip and Stack Settings
+                                            Chip and Stack Settings{!isPro && <span className="block text-xs font-normal mt-0.5">(Pro Feature)</span>}
                                         </button>
                                         <button
                                             onClick={() => setTournamentSettingsSubView('visual')}
@@ -5895,6 +5938,9 @@ const getPerPlayerCountForChip = (chipId) => {
                         </div>
                     )}
                     <audio ref={audioRef} src="https://quicksounds.com/uploads/tracks/1098360932_1903340572_1377612226.mp3" preload="auto"></audio>
+                    {lockedFeatureName && (
+                        <ProFeatureModal featureName={lockedFeatureName} onClose={() => setLockedFeatureName(null)} />
+                    )}
                 </div>
             );
         };
@@ -6884,6 +6930,7 @@ useEffect(() => { localStorage.setItem('showSquidGame', JSON.stringify(showSquid
 			  setShowHighHandSettings(false);
 			};
 const [showHighHandSettings, setShowHighHandSettings] = useState(false);
+const [lockedFeatureName, setLockedFeatureName] = useState(null);
 
        return (
                 <div
@@ -7203,11 +7250,17 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
 										<button onClick={() => setHighHandSettingsSubView('jackpot')} className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200">
 										  Bad Beat Jackpot
 										</button>
-										<button onClick={() => setHighHandSettingsSubView('additionalGames')} className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200">
-										  Additional Games
+										<button
+										  onClick={() => { if (isPro) { setHighHandSettingsSubView('additionalGames'); } else { setLockedFeatureName('Additional Games'); } }}
+										  className={`px-6 py-3 text-white font-semibold rounded-lg shadow-md transition-all duration-200 ${isPro ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-500 opacity-70'}`}
+										>
+										  Additional Games{!isPro && <span className="block text-xs font-normal mt-0.5">(Pro Feature)</span>}
 										</button>
-										<button onClick={() => setHighHandSettingsSubView('chipSettings')} className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200">
-										  Chip Denominations
+										<button
+										  onClick={() => { if (isPro) { setHighHandSettingsSubView('chipSettings'); } else { setLockedFeatureName('Chip Distribution Calculator'); } }}
+										  className={`px-6 py-3 text-white font-semibold rounded-lg shadow-md transition-all duration-200 ${isPro ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-500 opacity-70'}`}
+										>
+										  Chip Denominations{!isPro && <span className="block text-xs font-normal mt-0.5">(Pro Feature)</span>}
 										</button>
 										<div className="flex justify-end mt-8">
 										  <button onClick={() => {
@@ -8141,6 +8194,9 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
                         </div>
                     )}
                     <audio ref={audioRef} src="https://quicksounds.com/uploads/tracks/1098360932_1903340572_1377612226.mp3" preload="auto"></audio>
+                    {lockedFeatureName && (
+                        <ProFeatureModal featureName={lockedFeatureName} onClose={() => setLockedFeatureName(null)} />
+                    )}
                 </div>
             );
         };
@@ -8354,6 +8410,7 @@ const [showHighHandSettings, setShowHighHandSettings] = useState(false);
           theme={theme}
           headingTextColorClass={headingTextColorClass}
           mainCardBgClass={mainCardBgClass}
+          isPro={isEffectivePro}
         />
       </div>
 
