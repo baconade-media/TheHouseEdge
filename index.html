@@ -5922,7 +5922,7 @@ const getPerPlayerCountForChip = (chipId) => {
             const [highHandSettingsSubView, setHighHandSettingsSubView] = useState('main'); // 'main', 'visual', 'jackpot', 'additionalGames', 'chipSettings'
             const [showAddManageHands, setShowAddManageHands] = useState(false);
             const [isFullscreen, setIsFullscreen] = useState(false);
-            const [timeRemaining, setTimeRemaining] = useState(0);
+            const [timeRemaining, setTimeRemaining] = useState(60 * 60); // defaults to 60 min, matching inputDuration's own default -- starting at 0 caused the alarm to fire immediately on mount
             const [isRunning, setIsRunning] = useState(false);
 
             // --- Live multi-device sync (Pro feature), same pattern as Tournament ---
