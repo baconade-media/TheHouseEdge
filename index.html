@@ -5535,6 +5535,12 @@ const getPerPlayerCountForChip = (chipId) => {
                                                 different tournament nights may use physically different chips */}
                                             <div className={`${sectionBgClass} rounded-lg p-3`}>
                                                 <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5 block`}>Chip Set Presets (chips, players, target stack, style)</label>
+                                                {!isPro ? (
+                                                    <div className="flex items-center justify-center gap-2 py-4 text-gray-400 text-sm">
+                                                        🔒 Unlocked by Pro
+                                                    </div>
+                                                ) : (
+                                                <>
                                                 <select
                                                     value=""
                                                     onChange={(e) => { if (e.target.value) loadChipPreset(e.target.value); }}
@@ -5573,11 +5579,14 @@ const getPerPlayerCountForChip = (chipId) => {
                                                         ))}
                                                     </div>
                                                 )}
+                                                </>
+                                                )}
                                             </div>
 
                                             {/* Summary panel: players + target stack + achievable stack, as clean stat cards */}
                                             <div className="relative">
-                                                <div className={`rounded-xl border border-yellow-400/50 bg-yellow-500/5 p-4 ${!isPro ? 'opacity-30 pointer-events-none select-none' : ''}`}>
+                                                {isPro ? (
+                                                <div className="rounded-xl border border-yellow-400/50 bg-yellow-500/5 p-4">
                                                     <p className="text-xs font-bold text-yellow-300 uppercase tracking-wide mb-3">
                                                         Enter number of players and how many of each chip you own
                                                     </p>
@@ -5636,6 +5645,31 @@ const getPerPlayerCountForChip = (chipId) => {
                                                         </select>
                                                     </div>
                                                 </div>
+                                                ) : (
+                                                <div className="rounded-xl border border-yellow-400/50 bg-yellow-500/5 p-4 opacity-40 pointer-events-none select-none">
+                                                    <p className="text-xs font-bold text-yellow-300 uppercase tracking-wide mb-3">
+                                                        Enter number of players and how many of each chip you own
+                                                    </p>
+                                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                                        <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center items-center`}>
+                                                            <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5`}>Number of Players</label>
+                                                            <span className="text-2xl font-bold text-gray-500">—</span>
+                                                        </div>
+                                                        <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center`}>
+                                                            <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5`}>Target Starting Stack</label>
+                                                            <span className="text-lg font-bold text-gray-500">—</span>
+                                                        </div>
+                                                        <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center`}>
+                                                            <span className={`text-xs font-semibold ${subtextColorClass} mb-1.5`}>Achievable With Your Chips</span>
+                                                            <span className="text-lg font-bold text-gray-500">—</span>
+                                                        </div>
+                                                    </div>
+                                                    <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center mt-3`}>
+                                                        <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5`}>Chip Distribution Style</label>
+                                                        <span className="text-sm text-gray-500">—</span>
+                                                    </div>
+                                                </div>
+                                                )}
                                                 {!isPro && (
                                                     <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/40 rounded-xl">
                                                         <span className="text-3xl">🔒</span>
@@ -5690,18 +5724,24 @@ const getPerPlayerCountForChip = (chipId) => {
                                                             </div>
                                                             <div className="flex flex-col items-center">
                                                                 <label className={`text-xs font-semibold ${subtextColorClass} block mb-1`}>Quantity Owned</label>
-                                                                <WheelPicker
-                                                                    value={chip.quantity ?? 0}
-                                                                    onChange={(v) => {
-                                                                        setChipDenominations(prev =>
-                                                                            prev.map(c => c.id === chip.id ? { ...c, quantity: v } : c)
-                                                                        );
-                                                                    }}
-                                                                    min={0}
-                                                                    max={2000}
-                                                                    step={20}
-                                                                    width="4.5rem"
-                                                                />
+                                                                {isPro ? (
+                                                                    <WheelPicker
+                                                                        value={chip.quantity ?? 0}
+                                                                        onChange={(v) => {
+                                                                            setChipDenominations(prev =>
+                                                                                prev.map(c => c.id === chip.id ? { ...c, quantity: v } : c)
+                                                                            );
+                                                                        }}
+                                                                        min={0}
+                                                                        max={2000}
+                                                                        step={20}
+                                                                        width="4.5rem"
+                                                                    />
+                                                                ) : (
+                                                                    <span className="text-xs text-gray-500 flex flex-col items-center gap-0.5 h-9 justify-center">
+                                                                        🔒 Pro
+                                                                    </span>
+                                                                )}
                                                             </div>
                                                         </div>
 
@@ -7767,6 +7807,12 @@ const [lockedFeatureName, setLockedFeatureName] = useState(null);
                                             {/* Cash Game Chip Set Presets */}
                                             <div className={`${sectionBgClass} rounded-lg p-3`}>
                                                 <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5 block`}>Table Setup Presets (chips, blinds, players, buy-in)</label>
+                                                {!isPro ? (
+                                                    <div className="flex items-center justify-center gap-2 py-4 text-gray-400 text-sm">
+                                                        🔒 Unlocked by Pro
+                                                    </div>
+                                                ) : (
+                                                <>
                                                 <select
                                                     value=""
                                                     onChange={(e) => { if (e.target.value) loadCashChipPreset(e.target.value); }}
@@ -7805,6 +7851,8 @@ const [lockedFeatureName, setLockedFeatureName] = useState(null);
                                                         ))}
                                                     </div>
                                                 )}
+                                                </>
+                                                )}
                                             </div>
 
                                             {/* Cash Game Smart Chip Builder -- stakes + min/max buy-in drive the
@@ -7813,7 +7861,8 @@ const [lockedFeatureName, setLockedFeatureName] = useState(null);
                                                 player shares the same small-chip base and only the bigger
                                                 denominations scale up as buy-in increases. */}
                                             <div className="relative">
-                                            <div className={`rounded-xl border border-cyan-400/50 bg-cyan-500/5 p-4 ${!isPro ? 'opacity-30 pointer-events-none select-none' : ''}`}>
+                                            {isPro ? (
+                                            <div className="rounded-xl border border-cyan-400/50 bg-cyan-500/5 p-4">
                                                 <p className="text-xs font-bold text-cyan-300 uppercase tracking-wide mb-3">
                                                     Enter stakes, buy-in range, and how many of each chip you own
                                                 </p>
@@ -7919,6 +7968,55 @@ const [lockedFeatureName, setLockedFeatureName] = useState(null);
                                                     Every buy-in level shares the same base of small chips (enough to post {cashSmallBlind > 0 ? `$${cashSmallBlind}/$${cashBigBlind}` : 'the blinds'} a couple times over) -- as buy-in rises from min to max, the extra value is made up with bigger denominations on top.
                                                 </p>
                                             </div>
+                                            ) : (
+                                            <div className="rounded-xl border border-cyan-400/50 bg-cyan-500/5 p-4 opacity-40 pointer-events-none select-none">
+                                                <p className="text-xs font-bold text-cyan-300 uppercase tracking-wide mb-3">
+                                                    Enter stakes, buy-in range, and how many of each chip you own
+                                                </p>
+                                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                                    <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center`}>
+                                                        <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5`}>Small Blind</label>
+                                                        <span className="text-lg font-bold text-gray-500">—</span>
+                                                    </div>
+                                                    <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center`}>
+                                                        <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5`}>Big Blind</label>
+                                                        <span className="text-lg font-bold text-gray-500">—</span>
+                                                    </div>
+                                                    <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center items-center`}>
+                                                        <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5`}>Number of Players</label>
+                                                        <span className="text-2xl font-bold text-gray-500">—</span>
+                                                    </div>
+                                                    <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center`}>
+                                                        <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5`}>Chip Distribution Style</label>
+                                                        <span className="text-sm text-gray-500">—</span>
+                                                    </div>
+                                                </div>
+                                                <div className="grid grid-cols-2 gap-3 mt-3">
+                                                    <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center`}>
+                                                        <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5`}>Min Buy-in ($)</label>
+                                                        <span className="text-lg font-bold text-gray-500">—</span>
+                                                    </div>
+                                                    <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center`}>
+                                                        <label className={`text-xs font-semibold ${subtextColorClass} mb-1.5`}>Max Buy-in ($)</label>
+                                                        <span className="text-lg font-bold text-gray-500">—</span>
+                                                    </div>
+                                                </div>
+                                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
+                                                    <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center`}>
+                                                        <span className={`text-xs font-semibold ${subtextColorClass} mb-1`}>At Min Buy-in</span>
+                                                        <span className="text-lg font-bold text-gray-500">—</span>
+                                                    </div>
+                                                    <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center`}>
+                                                        <span className={`text-xs font-semibold ${subtextColorClass} mb-1`}>At Mid Buy-in</span>
+                                                        <span className="text-lg font-bold text-gray-500">—</span>
+                                                    </div>
+                                                    <div className={`${sectionBgClass} rounded-lg p-3 flex flex-col justify-center`}>
+                                                        <span className={`text-xs font-semibold ${subtextColorClass} mb-1`}>At Max Buy-in</span>
+                                                        <span className="text-lg font-bold text-gray-500">—</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            )}
                                             {!isPro && (
                                                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/40 rounded-xl">
                                                     <span className="text-3xl">🔒</span>
@@ -7964,14 +8062,18 @@ const [lockedFeatureName, setLockedFeatureName] = useState(null);
                                                             </div>
                                                             <div className="flex items-center gap-2">
                                                                 <label className={`${subtextColorClass} text-sm whitespace-nowrap`}>Owned:</label>
-                                                                <WheelPicker
-                                                                    value={chip.quantity ?? 0}
-                                                                    onChange={(v) => updateChipDenomination(chip.id, 'quantity', v)}
-                                                                    min={0}
-                                                                    max={2000}
-                                                                    step={20}
-                                                                    width="4.5rem"
-                                                                />
+                                                                {isPro ? (
+                                                                    <WheelPicker
+                                                                        value={chip.quantity ?? 0}
+                                                                        onChange={(v) => updateChipDenomination(chip.id, 'quantity', v)}
+                                                                        min={0}
+                                                                        max={2000}
+                                                                        step={20}
+                                                                        width="4.5rem"
+                                                                    />
+                                                                ) : (
+                                                                    <span className="text-xs text-gray-500">🔒 Pro</span>
+                                                                )}
                                                             </div>
                                                             <button
                                                                 onClick={() => deleteChipDenomination(chip.id)}
