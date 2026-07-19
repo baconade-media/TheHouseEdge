@@ -81,6 +81,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-storage-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-functions-compat.js"></script>
     <script>
       const firebaseConfig = {
         apiKey: "AIzaSyD377ROit6RCFMX9sEFey2adhHRbEDwelc",
@@ -94,6 +95,7 @@
       firebase.initializeApp(firebaseConfig);
       window.__firebaseAuth = firebase.auth();
       window.__firebaseDb = firebase.firestore();
+      window.__firebaseFunctions = firebase.functions();
       window.__firebaseStorage = firebase.storage();
 
       // --- Cloud sync helpers (operate directly on localStorage) ---
@@ -840,7 +842,7 @@
                                         <p className="text-xs mb-4 opacity-60">Your settings sync automatically to your account and follow you to any device you log into. All of it is encrypted in transit and at rest, and only visible to you.</p>
 
                                         {userTier !== 'pro' && (
-                                            <button onClick={() => alert('Upgrading to Pro is coming soon!')} className="w-full py-2 rounded-md bg-gradient-to-r from-yellow-500 to-orange-500 hover:opacity-90 text-white font-semibold mb-2 flex items-center justify-center gap-1.5">
+                                            <button onClick={startCheckout} className="w-full py-2 rounded-md bg-gradient-to-r from-yellow-500 to-orange-500 hover:opacity-90 text-white font-semibold mb-2 flex items-center justify-center gap-1.5">
                                                 <svg viewBox="0 0 32 32" className="w-4 h-4 shrink-0">
                                                     <circle cx="16" cy="16" r="14" fill="#ffffff" stroke="#7c2d12" strokeWidth="2" />
                                                     <circle cx="16" cy="16" r="9.5" fill="none" stroke="#7c2d12" strokeWidth="2" strokeDasharray="3.2 3.2" />
@@ -2822,6 +2824,24 @@
         // Shared "this is a Pro feature" modal -- used everywhere a Free user
         // taps into something gated, so the upsell message and styling stays
         // consistent no matter which feature triggered it.
+        // Kicks off a real Stripe Checkout session via the createCheckoutSession
+        // Cloud Function, then redirects the browser to Stripe's hosted payment
+        // page. Used by every "Upgrade to Pro" button in the app.
+        const startCheckout = async () => {
+            try {
+                const createCheckoutSession = window.__firebaseFunctions.httpsCallable('createCheckoutSession');
+                const result = await createCheckoutSession();
+                if (result.data && result.data.url) {
+                    window.location.href = result.data.url;
+                } else {
+                    alert("Couldn't start checkout -- please try again in a moment.");
+                }
+            } catch (e) {
+                console.error('Could not start checkout:', e);
+                alert(e.message || "Couldn't start checkout -- please try again in a moment.");
+            }
+        };
+
         const ProFeatureModal = ({ featureName, onClose }) => (
             <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
                 <div className="w-full max-w-sm rounded-2xl shadow-2xl p-6 bg-gray-800 text-white" onClick={(e) => e.stopPropagation()}>
@@ -2831,7 +2851,7 @@
                         <p className="text-sm opacity-70">Upgrade to Pro to unlock {featureName}, and everything else Pro includes.</p>
                     </div>
                     <button
-                        onClick={() => alert('Upgrading to Pro is coming soon!')}
+                        onClick={startCheckout}
                         className="w-full py-3 rounded-md bg-gradient-to-r from-yellow-500 to-orange-500 hover:opacity-90 text-white font-semibold mb-2 flex items-center justify-center gap-2"
                     >
                         <svg viewBox="0 0 32 32" className="w-4 h-4 shrink-0">
@@ -8380,6 +8400,37 @@ const [lockedFeatureName, setLockedFeatureName] = useState(null);
   const [trialEndsAt, setTrialEndsAt] = useState(() => window.__trialEndsAt);
   const [trialUsed, setTrialUsed] = useState(() => window.__trialUsed);
   const isEffectivePro = userTier === 'pro' || (trialEndsAt && trialEndsAt > Date.now());
+  const [checkoutStatus, setCheckoutStatus] = useState(null); // null | 'processing' | 'confirmed' | 'timedOut'
+
+  // After a successful Stripe checkout, the browser gets redirected back here
+  // with ?upgraded=true -- but the webhook that actually flips the tier to
+  // 'pro' runs separately and might take a moment to land. Poll briefly
+  // rather than assume it's already done by the time this page loads.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('upgraded') !== 'true' || !authUser) return;
+
+    // Clean the URL so refreshing doesn't re-trigger this.
+    window.history.replaceState({}, '', window.location.pathname);
+    setCheckoutStatus('processing');
+
+    let attempts = 0;
+    const maxAttempts = 8; // ~16 seconds total
+    const interval = setInterval(async () => {
+      attempts++;
+      await window.__resolveUserTier(authUser);
+      if (window.__userTier === 'pro') {
+        setUserTier('pro');
+        setCheckoutStatus('confirmed');
+        clearInterval(interval);
+      } else if (attempts >= maxAttempts) {
+        setCheckoutStatus('timedOut');
+        clearInterval(interval);
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [authUser]);
 
   const goToView = (view) => {
     setCurrentView(view);
@@ -8523,6 +8574,39 @@ const [lockedFeatureName, setLockedFeatureName] = useState(null);
 
   return (
     <>
+      {checkoutStatus && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-sm rounded-2xl shadow-2xl p-6 bg-gray-800 text-white text-center">
+            {checkoutStatus === 'processing' && (
+              <>
+                <div className="text-4xl mb-2">⏳</div>
+                <h3 className="text-lg font-bold mb-2">Confirming your upgrade…</h3>
+                <p className="text-sm opacity-70">This usually only takes a few seconds.</p>
+              </>
+            )}
+            {checkoutStatus === 'confirmed' && (
+              <>
+                <div className="text-4xl mb-2">🎉</div>
+                <h3 className="text-lg font-bold mb-2">Welcome to Pro!</h3>
+                <p className="text-sm opacity-70 mb-4">Everything's unlocked -- thanks for the support.</p>
+                <button onClick={() => setCheckoutStatus(null)} className="w-full py-2 rounded-md bg-blue-600 hover:bg-blue-700 font-semibold">
+                    Let's go
+                </button>
+              </>
+            )}
+            {checkoutStatus === 'timedOut' && (
+              <>
+                <div className="text-4xl mb-2">🤔</div>
+                <h3 className="text-lg font-bold mb-2">Still confirming…</h3>
+                <p className="text-sm opacity-70 mb-4">Your payment went through, but it's taking longer than usual to reflect here. Try refreshing in a minute -- if it still hasn't updated, use the Contact/Support option in your account menu.</p>
+                <button onClick={() => setCheckoutStatus(null)} className="w-full py-2 rounded-md border border-gray-600">
+                    Close
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
       <AuthWidget
         user={authUser}
         theme={theme}
