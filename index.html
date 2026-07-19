@@ -1236,6 +1236,14 @@
             10000, 25000, 50000, 100000
         ];
 
+        // Tournament chips are abstract point values, not real money -- no cents,
+        // no dollar sign, starting at 1 rather than a penny.
+        const TOURNAMENT_CHIP_DENOMINATIONS = [
+            1, 5, 10, 20, 25, 50,
+            100, 250, 500, 1000, 2500, 5000,
+            10000, 25000, 50000, 100000, 250000, 500000, 1000000
+        ];
+
         /**
          * DraftNumberInput Component
          * A plain number input has a common frustration: if onChange does
@@ -5717,8 +5725,8 @@ const getPerPlayerCountForChip = (chipId) => {
                                                                 <WheelPicker
                                                                     value={chip.value}
                                                                     onChange={(v) => updateChipDenomination(chip.id, 'value', v)}
-                                                                    values={STANDARD_CHIP_DENOMINATIONS}
-                                                                    formatValue={(v) => v < 1 ? `$${v.toFixed(2)}` : `$${v.toLocaleString()}`}
+                                                                    values={TOURNAMENT_CHIP_DENOMINATIONS}
+                                                                    formatValue={(v) => v.toLocaleString()}
                                                                     width="5rem"
                                                                 />
                                                             </div>
