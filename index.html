@@ -644,6 +644,7 @@
             const [info, setInfo] = useState('');
             const [showPrivacyPolicy, setShowPrivacyPolicy] = useState(false);
             const [showContactForm, setShowContactForm] = useState(false);
+            const [showUpgradeConfirm, setShowUpgradeConfirm] = useState(false);
             const [contactMessage, setContactMessage] = useState('');
             const [contactBusy, setContactBusy] = useState(false);
             const [contactSent, setContactSent] = useState(false);
@@ -842,7 +843,7 @@
                                         <p className="text-xs mb-4 opacity-60">Your settings sync automatically to your account and follow you to any device you log into. All of it is encrypted in transit and at rest, and only visible to you.</p>
 
                                         {userTier !== 'pro' && (
-                                            <button onClick={startCheckout} className="w-full py-2 rounded-md bg-gradient-to-r from-yellow-500 to-orange-500 hover:opacity-90 text-white font-semibold mb-2 flex items-center justify-center gap-1.5">
+                                            <button onClick={() => setShowUpgradeConfirm(true)} className="w-full py-2 rounded-md bg-gradient-to-r from-yellow-500 to-orange-500 hover:opacity-90 text-white font-semibold mb-2 flex items-center justify-center gap-1.5">
                                                 <svg viewBox="0 0 32 32" className="w-4 h-4 shrink-0">
                                                     <circle cx="16" cy="16" r="14" fill="#ffffff" stroke="#7c2d12" strokeWidth="2" />
                                                     <circle cx="16" cy="16" r="9.5" fill="none" stroke="#7c2d12" strokeWidth="2" strokeDasharray="3.2 3.2" />
@@ -1064,6 +1065,9 @@
                                 )}
                             </div>
                         </div>
+                    )}
+                    {showUpgradeConfirm && (
+                        <UpgradeConfirmModal onClose={() => setShowUpgradeConfirm(false)} />
                     )}
                 </>
             );
@@ -2824,6 +2828,13 @@
         // Shared "this is a Pro feature" modal -- used everywhere a Free user
         // taps into something gated, so the upsell message and styling stays
         // consistent no matter which feature triggered it.
+        // The Pro price as shown in the app -- this is just a display label,
+        // the actual charge amount always comes from Stripe itself (via
+        // PRO_PRICE_ID in the Cloud Function). If the price ever changes in
+        // Stripe, update this string to match so what's shown here stays
+        // accurate.
+        const PRO_PRICE_DISPLAY = '$4.99';
+
         // Kicks off a real Stripe Checkout session via the createCheckoutSession
         // Cloud Function, then redirects the browser to Stripe's hosted payment
         // page. Used by every "Upgrade to Pro" button in the app.
@@ -2842,31 +2853,98 @@
             }
         };
 
-        const ProFeatureModal = ({ featureName, onClose }) => (
-            <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
-                <div className="w-full max-w-sm rounded-2xl shadow-2xl p-6 bg-gray-800 text-white" onClick={(e) => e.stopPropagation()}>
-                    <div className="text-center mb-4">
-                        <div className="text-4xl mb-2">🔒</div>
-                        <h3 className="text-xl font-bold mb-2">{featureName} is a Pro Feature</h3>
-                        <p className="text-sm opacity-70">Upgrade to Pro to unlock {featureName}, and everything else Pro includes.</p>
+        // Shown before redirecting to Stripe, so the price is visible inside
+        // the app itself rather than someone only seeing it after they've
+        // already been sent off to a payment page.
+        const UpgradeConfirmModal = ({ onClose }) => {
+            const [busy, setBusy] = useState(false);
+            return (
+                <div className="fixed inset-0 z-[75] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+                    <div className="w-full max-w-sm rounded-2xl shadow-2xl p-6 bg-gray-800 text-white" onClick={(e) => e.stopPropagation()}>
+                        <div className="text-center mb-5">
+                            <svg viewBox="0 0 32 32" className="w-10 h-10 mx-auto mb-2">
+                                <circle cx="16" cy="16" r="14" fill="#facc15" stroke="#ffffff" strokeWidth="2" />
+                                <circle cx="16" cy="16" r="9.5" fill="none" stroke="#ffffff" strokeWidth="2" strokeDasharray="3.2 3.2" />
+                                <circle cx="16" cy="16" r="4" fill="#ffffff" />
+                            </svg>
+                            <h3 className="text-xl font-bold mb-1">Upgrade to Pro</h3>
+                            <p className="text-3xl font-black text-yellow-300 mb-1">{PRO_PRICE_DISPLAY}</p>
+                            <p className="text-xs opacity-60">One-time payment. No subscription, yours for good.</p>
+                        </div>
+                        <button
+                            onClick={async () => { setBusy(true); await startCheckout(); }}
+                            disabled={busy}
+                            className="w-full py-3 rounded-md bg-gradient-to-r from-yellow-500 to-orange-500 hover:opacity-90 text-white font-semibold mb-2 disabled:opacity-50"
+                        >
+                            {busy ? 'Redirecting to secure checkout…' : 'Continue to Payment'}
+                        </button>
+                        <button onClick={onClose} disabled={busy} className="w-full py-2 rounded-md border border-gray-600 text-sm disabled:opacity-50">
+                            Cancel
+                        </button>
                     </div>
-                    <button
-                        onClick={startCheckout}
-                        className="w-full py-3 rounded-md bg-gradient-to-r from-yellow-500 to-orange-500 hover:opacity-90 text-white font-semibold mb-2 flex items-center justify-center gap-2"
-                    >
-                        <svg viewBox="0 0 32 32" className="w-4 h-4 shrink-0">
-                            <circle cx="16" cy="16" r="14" fill="#ffffff" stroke="#7c2d12" strokeWidth="2" />
-                            <circle cx="16" cy="16" r="9.5" fill="none" stroke="#7c2d12" strokeWidth="2" strokeDasharray="3.2 3.2" />
-                            <circle cx="16" cy="16" r="4" fill="#facc15" />
-                        </svg>
-                        Upgrade to Pro
-                    </button>
-                    <button onClick={onClose} className="w-full py-2 rounded-md border border-gray-600 text-sm">
-                        Maybe Later
-                    </button>
                 </div>
-            </div>
-        );
+            );
+        };
+
+        const ProFeatureModal = ({ featureName, onClose }) => {
+            const [confirming, setConfirming] = useState(false);
+            const [busy, setBusy] = useState(false);
+
+            if (confirming) {
+                return (
+                    <div className="fixed inset-0 z-[75] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+                        <div className="w-full max-w-sm rounded-2xl shadow-2xl p-6 bg-gray-800 text-white" onClick={(e) => e.stopPropagation()}>
+                            <div className="text-center mb-5">
+                                <svg viewBox="0 0 32 32" className="w-10 h-10 mx-auto mb-2">
+                                    <circle cx="16" cy="16" r="14" fill="#facc15" stroke="#ffffff" strokeWidth="2" />
+                                    <circle cx="16" cy="16" r="9.5" fill="none" stroke="#ffffff" strokeWidth="2" strokeDasharray="3.2 3.2" />
+                                    <circle cx="16" cy="16" r="4" fill="#ffffff" />
+                                </svg>
+                                <h3 className="text-xl font-bold mb-1">Upgrade to Pro</h3>
+                                <p className="text-3xl font-black text-yellow-300 mb-1">{PRO_PRICE_DISPLAY}</p>
+                                <p className="text-xs opacity-60">One-time payment. No subscription, yours for good.</p>
+                            </div>
+                            <button
+                                onClick={async () => { setBusy(true); await startCheckout(); }}
+                                disabled={busy}
+                                className="w-full py-3 rounded-md bg-gradient-to-r from-yellow-500 to-orange-500 hover:opacity-90 text-white font-semibold mb-2 disabled:opacity-50"
+                            >
+                                {busy ? 'Redirecting to secure checkout…' : 'Continue to Payment'}
+                            </button>
+                            <button onClick={() => setConfirming(false)} disabled={busy} className="w-full py-2 rounded-md border border-gray-600 text-sm disabled:opacity-50">
+                                Back
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+                    <div className="w-full max-w-sm rounded-2xl shadow-2xl p-6 bg-gray-800 text-white" onClick={(e) => e.stopPropagation()}>
+                        <div className="text-center mb-4">
+                            <div className="text-4xl mb-2">🔒</div>
+                            <h3 className="text-xl font-bold mb-2">{featureName} is a Pro Feature</h3>
+                            <p className="text-sm opacity-70">Upgrade to Pro to unlock {featureName}, and everything else Pro includes.</p>
+                        </div>
+                        <button
+                            onClick={() => setConfirming(true)}
+                            className="w-full py-3 rounded-md bg-gradient-to-r from-yellow-500 to-orange-500 hover:opacity-90 text-white font-semibold mb-2 flex items-center justify-center gap-2"
+                        >
+                            <svg viewBox="0 0 32 32" className="w-4 h-4 shrink-0">
+                                <circle cx="16" cy="16" r="14" fill="#ffffff" stroke="#7c2d12" strokeWidth="2" />
+                                <circle cx="16" cy="16" r="9.5" fill="none" stroke="#7c2d12" strokeWidth="2" strokeDasharray="3.2 3.2" />
+                                <circle cx="16" cy="16" r="4" fill="#facc15" />
+                            </svg>
+                            Upgrade to Pro
+                        </button>
+                        <button onClick={onClose} className="w-full py-2 rounded-md border border-gray-600 text-sm">
+                            Maybe Later
+                        </button>
+                    </div>
+                </div>
+            );
+        };
 
         const HomeView = ({ onSelectMode, theme, headingTextColorClass, mainCardBgClass, isPro }) => {
             console.log("HomeView component rendering");
