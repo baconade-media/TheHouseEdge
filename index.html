@@ -2247,32 +2247,38 @@
             const smsLink = (invitee, event) => `sms:${invitee.phone}?body=${encodeURIComponent(getOutgoingMessage(event))}`;
             const emailLink = (invitee, event) => `mailto:${invitee.email}?subject=${encodeURIComponent(event.title + ' - Invite')}&body=${encodeURIComponent(getOutgoingMessage(event))}`;
 
-            const textAllPending = () => {
+            // Which group of invitees the message buttons below act on -- lets
+            // the host either nudge people who haven't responded yet, or send
+            // a logistics update (time change, address, etc.) to everyone who's
+            // already confirmed.
+            const [messageTargetGroup, setMessageTargetGroup] = useState('pending'); // 'pending' | 'yes'
+
+            const textAllByStatus = (status) => {
                 if (!currentEvent) return;
-                const numbers = currentEvent.invitees.filter(i => i.status === 'pending' && i.phone).map(i => i.phone);
+                const numbers = currentEvent.invitees.filter(i => i.status === status && i.phone).map(i => i.phone);
                 if (!numbers.length) return;
                 window.location.href = `sms:${numbers.join(',')}?body=${encodeURIComponent(getOutgoingMessage(currentEvent))}`;
             };
 
-            const emailAllPending = () => {
+            const emailAllByStatus = (status) => {
                 if (!currentEvent) return;
-                const emails = currentEvent.invitees.filter(i => i.status === 'pending' && i.email).map(i => i.email);
+                const emails = currentEvent.invitees.filter(i => i.status === status && i.email).map(i => i.email);
                 if (!emails.length) return;
                 window.location.href = `mailto:${emails.join(',')}?subject=${encodeURIComponent(currentEvent.title + ' - Invite')}&body=${encodeURIComponent(getOutgoingMessage(currentEvent))}`;
             };
 
             // A browser can only ever trigger one sms: link per tap, so there's no
             // way to fire off several separate texts from a single button press --
-            // that's why "Text All Pending" has to bundle everyone into one group
-            // text to work in one tap. This instead walks through pending people
-            // one at a time, so each person gets their own private text instead of
-            // a group thread where everyone can see each other's numbers.
+            // that's why "Text All" has to bundle everyone into one group text to
+            // work in one tap. This instead walks through the selected group one
+            // at a time, so each person gets their own private text instead of a
+            // group thread where everyone can see each other's numbers.
             const [individualTextQueue, setIndividualTextQueue] = useState(null); // null | array of invitees
             const [individualTextIndex, setIndividualTextIndex] = useState(0);
 
-            const startIndividualTexting = () => {
+            const startIndividualTexting = (status) => {
                 if (!currentEvent) return;
-                const queue = currentEvent.invitees.filter(i => i.status === 'pending' && i.phone);
+                const queue = currentEvent.invitees.filter(i => i.status === status && i.phone);
                 if (!queue.length) return;
                 setIndividualTextQueue(queue);
                 setIndividualTextIndex(0);
@@ -2639,14 +2645,29 @@
                             </div>
 
                             <div className="flex gap-2 mb-2">
-                                <button onClick={textAllPending} className="flex-1 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold">
-                                    Text All Pending
+                                <button
+                                    onClick={() => setMessageTargetGroup('pending')}
+                                    className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all ${messageTargetGroup === 'pending' ? 'bg-gray-500 text-white' : 'bg-slate-900 text-slate-100'}`}
+                                >
+                                    No Response ({stats.pending})
                                 </button>
-                                <button onClick={emailAllPending} className="flex-1 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold">
-                                    Email All Pending
+                                <button
+                                    onClick={() => setMessageTargetGroup('yes')}
+                                    className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all ${messageTargetGroup === 'yes' ? 'bg-green-600 text-white' : 'bg-slate-900 text-slate-100'}`}
+                                >
+                                    Confirmed Yes ({stats.yes})
                                 </button>
                             </div>
-                            <button onClick={startIndividualTexting} className="w-full py-2.5 rounded-lg text-sm font-semibold mb-4 border-2 border-blue-500 text-blue-500 hover:bg-blue-500 hover:text-white transition-colors">
+
+                            <div className="flex gap-2 mb-2">
+                                <button onClick={() => textAllByStatus(messageTargetGroup)} className="flex-1 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold">
+                                    Text All {messageTargetGroup === 'yes' ? '(Confirmed)' : '(No Response)'}
+                                </button>
+                                <button onClick={() => emailAllByStatus(messageTargetGroup)} className="flex-1 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold">
+                                    Email All {messageTargetGroup === 'yes' ? '(Confirmed)' : '(No Response)'}
+                                </button>
+                            </div>
+                            <button onClick={() => startIndividualTexting(messageTargetGroup)} className="w-full py-2.5 rounded-lg text-sm font-semibold mb-4 border-2 border-blue-500 text-blue-500 hover:bg-blue-500 hover:text-white transition-colors">
                                 Text Individually (one at a time, no group text)
                             </button>
 
