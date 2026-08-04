@@ -3448,6 +3448,7 @@
 			try { return JSON.parse(localStorage.getItem('pokerChipPresets') || '[]'); } catch (e) { return []; }
 		});
 		const [newChipPresetName, setNewChipPresetName] = useState('');
+		const [activeChipPresetId, setActiveChipPresetId] = useState(null);
 
 		useEffect(() => {
 			localStorage.setItem('pokerChipPresets', JSON.stringify(chipPresets));
@@ -3758,6 +3759,13 @@ stack = Math.round(stack / roundingUnit) * roundingUnit;
 				  setBlindPresets(prev => [...prev, preset]);
 				  setActivePresetId(id);
 				  setNewPresetName('');
+				};
+
+				// Overwrites whichever preset is currently loaded (activePresetId)
+				// with the current level structure, instead of creating a new one.
+				const handleUpdatePreset = () => {
+				  if (!activePresetId || levels.length === 0) return;
+				  setBlindPresets(prev => prev.map(p => p.id === activePresetId ? { ...p, levels } : p));
 				};
 
 				const handleLoadPreset = (id) => {
@@ -4082,7 +4090,24 @@ stack = Math.round(stack / roundingUnit) * roundingUnit;
                     chipBias: chipBias,
                 };
                 setChipPresets(prev => [...prev, preset]);
+                setActiveChipPresetId(preset.id);
                 setNewChipPresetName('');
+            };
+
+            // Overwrites whichever preset is currently loaded with the current
+            // chip settings, instead of always creating a new preset.
+            const updateChipPreset = () => {
+                if (!activeChipPresetId) return;
+                setChipPresets(prev => prev.map(p => p.id === activeChipPresetId ? {
+                    ...p,
+                    denominations: chipDenominations.map(c => ({ value: c.value, color: c.color, quantity: c.quantity || 0 })),
+                    players: chipPlayers,
+                    customStackTarget: customStackTarget,
+                    chipBias: chipBias,
+                } : p));
+                setPresetLoadedMessage(`✅ Updated preset`);
+                clearTimeout(window.__presetToastTimeout);
+                window.__presetToastTimeout = setTimeout(() => setPresetLoadedMessage(''), 2500);
             };
 
             const loadChipPreset = (presetId) => {
@@ -4101,6 +4126,7 @@ stack = Math.round(stack / roundingUnit) * roundingUnit;
                 if (typeof preset.customStackTarget !== 'undefined') setCustomStackTarget(preset.customStackTarget);
                 if (typeof preset.chipBias === 'string') setChipBias(preset.chipBias);
 
+                setActiveChipPresetId(presetId);
                 setPresetLoadedMessage(`✅ Loaded "${preset.name}"`);
                 clearTimeout(window.__presetToastTimeout);
                 window.__presetToastTimeout = setTimeout(() => setPresetLoadedMessage(''), 2500);
@@ -5119,6 +5145,20 @@ const getPerPlayerCountForChip = (chipId) => {
 														  </select>
 
 														  <button
+														  	type="button"
+														  	disabled={!activePresetId}
+														  	onClick={() => activePresetId && handleUpdatePreset()}
+														  	className={
+														  	  "px-3 py-1.5 text-sm font-semibold rounded-md border " +
+														  	  (activePresetId
+														  		? "bg-blue-600 hover:bg-blue-500 text-white border-blue-500"
+														  		: "bg-gray-600 text-gray-300 border-gray-500 cursor-not-allowed")
+														  	}
+														    >
+														  	Update
+														  </button>
+
+														  <button
 															type="button"
 															disabled={!activePresetId}
 															onClick={() => activePresetId && handleDeletePreset(activePresetId)}
@@ -5724,6 +5764,11 @@ const getPerPlayerCountForChip = (chipId) => {
                                                         <option key={p.id} value={p.id}>{p.name} ({p.denominations.length} chips)</option>
                                                     ))}
                                                 </select>
+                                                {activeChipPresetId && (
+                                                    <button onClick={updateChipPreset} className="w-full mb-2 px-3 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold">
+                                                        Update "{chipPresets.find(p => p.id === activeChipPresetId)?.name}" With Current Settings
+                                                    </button>
+                                                )}
                                                 {presetLoadedMessage && (
                                                     <p className="text-xs text-green-400 font-semibold mb-2 text-center">{presetLoadedMessage}</p>
                                                 )}
@@ -6342,6 +6387,7 @@ const getPerPlayerCountForChip = (chipId) => {
                 try { return JSON.parse(localStorage.getItem('cashChipPresets') || '[]'); } catch (e) { return []; }
             });
             const [newCashChipPresetName, setNewCashChipPresetName] = useState('');
+            const [activeCashChipPresetId, setActiveCashChipPresetId] = useState(null);
 
             useEffect(() => {
                 localStorage.setItem('cashSmallBlind', cashSmallBlind);
@@ -6372,7 +6418,26 @@ const getPerPlayerCountForChip = (chipId) => {
                     maxBuyIn: cashMaxBuyIn,
                 };
                 setCashChipPresets(prev => [...prev, preset]);
+                setActiveCashChipPresetId(preset.id);
                 setNewCashChipPresetName('');
+            };
+
+            // Overwrites whichever preset is currently loaded with the current
+            // table setup, instead of always creating a new preset.
+            const updateCashChipPreset = () => {
+                if (!activeCashChipPresetId) return;
+                setCashChipPresets(prev => prev.map(p => p.id === activeCashChipPresetId ? {
+                    ...p,
+                    denominations: chipDenominations.map(c => ({ value: parseFloat(c.value) || 0, color: c.color, quantity: c.quantity || 0 })),
+                    smallBlind: cashSmallBlind,
+                    bigBlind: cashBigBlind,
+                    players: cashPlayers,
+                    minBuyIn: cashMinBuyIn,
+                    maxBuyIn: cashMaxBuyIn,
+                } : p));
+                setPresetLoadedMessage(`✅ Updated preset`);
+                clearTimeout(window.__presetToastTimeout);
+                window.__presetToastTimeout = setTimeout(() => setPresetLoadedMessage(''), 2500);
             };
 
             const loadCashChipPreset = (presetId) => {
@@ -6393,6 +6458,7 @@ const getPerPlayerCountForChip = (chipId) => {
                 if (typeof preset.minBuyIn === 'number') setCashMinBuyIn(preset.minBuyIn);
                 if (typeof preset.maxBuyIn === 'number') setCashMaxBuyIn(preset.maxBuyIn);
 
+                setActiveCashChipPresetId(presetId);
                 setPresetLoadedMessage(`✅ Loaded "${preset.name}"`);
                 clearTimeout(window.__presetToastTimeout);
                 window.__presetToastTimeout = setTimeout(() => setPresetLoadedMessage(''), 2500);
@@ -7996,6 +8062,11 @@ const [lockedFeatureName, setLockedFeatureName] = useState(null);
                                                         <option key={p.id} value={p.id}>{p.name} ({p.denominations.length} chips)</option>
                                                     ))}
                                                 </select>
+                                                {activeCashChipPresetId && (
+                                                    <button onClick={updateCashChipPreset} className="w-full mb-2 px-3 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold">
+                                                        Update "{cashChipPresets.find(p => p.id === activeCashChipPresetId)?.name}" With Current Settings
+                                                    </button>
+                                                )}
                                                 {presetLoadedMessage && (
                                                     <p className="text-xs text-green-400 font-semibold mb-2 text-center">{presetLoadedMessage}</p>
                                                 )}
