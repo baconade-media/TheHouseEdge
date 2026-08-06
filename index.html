@@ -5897,19 +5897,11 @@ const getPerPlayerCountForChip = (chipId) => {
                                             </div>
 
                                             {/* Chip inventory, one clean card per denomination */}
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                            <div className="space-y-2">
                                                 {chipDenominations.sort((a, b) => a.value - b.value).map(chip => (
-                                                    <div key={chip.id} className={`${sectionBgClass} rounded-xl p-4 shadow-sm relative`}>
-                                                        <button
-                                                            onClick={() => deleteChipDenomination(chip.id)}
-                                                            className="absolute top-3 right-3 w-7 h-7 flex items-center justify-center rounded-full bg-red-600/90 hover:bg-red-600 text-white text-sm font-bold"
-                                                            aria-label="Remove chip"
-                                                        >
-                                                            ✕
-                                                        </button>
-
-                                                        <div className="flex items-center gap-3 mb-3 pr-8">
-                                                            <svg viewBox="0 0 40 40" className="w-10 h-10 shrink-0" style={{ filter: 'drop-shadow(0 2px 3px rgba(0,0,0,0.4))' }}>
+                                                    <div key={chip.id} className={`${sectionBgClass} rounded-lg p-2.5 shadow-sm`}>
+                                                        <div className="flex items-center gap-2 flex-wrap">
+                                                            <svg viewBox="0 0 40 40" className="w-8 h-8 shrink-0" style={{ filter: 'drop-shadow(0 2px 3px rgba(0,0,0,0.4))' }}>
                                                                 <circle cx="20" cy="20" r="18" fill={chip.color} stroke="#ffffff" strokeWidth="2" />
                                                                 <circle cx="20" cy="20" r="18" fill="none" stroke="#000000" strokeOpacity="0.15" strokeWidth="1" />
                                                                 <circle cx="20" cy="20" r="13.5" fill="none" stroke="#ffffff" strokeWidth="2.5" strokeDasharray="4.2 4.2" />
@@ -5919,7 +5911,7 @@ const getPerPlayerCountForChip = (chipId) => {
                                                             <select
                                                                 value={chip.color}
                                                                 onChange={(e) => updateChipDenomination(chip.id, 'color', e.target.value)}
-                                                                className={`flex-grow px-2 py-2 rounded-md ${inputBgClass} ${inputBorderClass} border ${subtextColorClass} text-sm`}
+                                                                className={`w-24 px-1.5 py-1 rounded-md ${inputBgClass} ${inputBorderClass} border ${subtextColorClass} text-xs`}
                                                             >
                                                                 {predefinedColors.map(color => (
                                                                     <option key={color.hex} value={color.hex} style={{ backgroundColor: color.hex, color: (color.name === 'Black' || color.name === 'Maroon' || color.name === 'Indigo') ? 'white' : 'black' }}>
@@ -5927,21 +5919,18 @@ const getPerPlayerCountForChip = (chipId) => {
                                                                     </option>
                                                                 ))}
                                                             </select>
-                                                        </div>
-
-                                                        <div className="grid grid-cols-2 gap-3">
-                                                            <div className="flex flex-col items-center">
-                                                                <label className={`text-xs font-semibold ${subtextColorClass} block mb-1`}>Value</label>
+                                                            <div className="flex items-center gap-1.5">
+                                                                <label className={`text-xs ${subtextColorClass}`}>Value</label>
                                                                 <WheelPicker
                                                                     value={chip.value}
                                                                     onChange={(v) => updateChipDenomination(chip.id, 'value', v)}
                                                                     values={TOURNAMENT_CHIP_DENOMINATIONS}
                                                                     formatValue={(v) => v.toLocaleString()}
-                                                                    width="5rem"
+                                                                    width="4.5rem"
                                                                 />
                                                             </div>
-                                                            <div className="flex flex-col items-center">
-                                                                <label className={`text-xs font-semibold ${subtextColorClass} block mb-1`}>Quantity Owned</label>
+                                                            <div className="flex items-center gap-1.5">
+                                                                <label className={`text-xs ${subtextColorClass}`}>Qty</label>
                                                                 {isPro ? (
                                                                     <WheelPicker
                                                                         value={chip.quantity ?? 0}
@@ -5953,26 +5942,31 @@ const getPerPlayerCountForChip = (chipId) => {
                                                                         min={0}
                                                                         max={2000}
                                                                         step={20}
-                                                                        width="4.5rem"
+                                                                        width="4rem"
                                                                     />
                                                                 ) : (
-                                                                    <span className="text-xs text-gray-500 flex flex-col items-center gap-0.5 h-9 justify-center">
-                                                                        🔒 Pro
-                                                                    </span>
+                                                                    <span className="text-xs text-gray-500">🔒 Pro</span>
                                                                 )}
                                                             </div>
+                                                            <button
+                                                                onClick={() => deleteChipDenomination(chip.id)}
+                                                                className="ml-auto w-7 h-7 flex items-center justify-center rounded-full bg-red-600/90 hover:bg-red-600 text-white text-sm font-bold shrink-0"
+                                                                aria-label="Remove chip"
+                                                            >
+                                                                ✕
+                                                            </button>
                                                         </div>
 
                                                         {isPro && chipDistribution && (
-                                                            <div className="mt-3 text-center">
-                                                                <span className="inline-flex items-center justify-center px-3 py-1 rounded-full bg-blue-600/20 border border-blue-500/40 text-xs font-semibold text-blue-300">
+                                                            <div className="flex mt-2 pt-2 border-t border-white/5">
+                                                                <span className="inline-flex items-center justify-center px-2.5 py-0.5 rounded-full bg-blue-600/20 border border-blue-500/40 text-xs font-semibold text-blue-300">
                                                                     {getPerPlayerCountForChip(chip.id)} per player
                                                                 </span>
                                                             </div>
                                                         )}
                                                         {!isPro && (
-                                                            <div className="mt-3 text-center">
-                                                                <span className="inline-flex items-center justify-center px-3 py-1 rounded-full bg-gray-600/40 border border-gray-500/40 text-xs font-semibold text-gray-400">
+                                                            <div className="flex mt-2 pt-2 border-t border-white/5">
+                                                                <span className="inline-flex items-center justify-center px-2.5 py-0.5 rounded-full bg-gray-600/40 border border-gray-500/40 text-xs font-semibold text-gray-400">
                                                                     🔒 Pro
                                                                 </span>
                                                             </div>
@@ -8269,43 +8263,40 @@ const [lockedFeatureName, setLockedFeatureName] = useState(null);
                                             )}
                                             </div>
 
-                                            <div className="space-y-4">
+                                            <div className="space-y-2">
                                                 {chipDenominations.sort((a, b) => a.value - b.value).map(chip => (
-                                                    <div key={chip.id} className={`${sectionBgClass} p-3 rounded-lg shadow-sm space-y-3`}>
-                                                        <div className="flex items-center gap-4">
-                                                            <svg viewBox="0 0 40 40" className="w-9 h-9 shrink-0" style={{ filter: 'drop-shadow(0 2px 3px rgba(0,0,0,0.4))' }}>
-                                                <circle cx="20" cy="20" r="18" fill={chip.color} stroke="#ffffff" strokeWidth="2" />
-                                                <circle cx="20" cy="20" r="18" fill="none" stroke="#000000" strokeOpacity="0.15" strokeWidth="1" />
-                                                <circle cx="20" cy="20" r="13.5" fill="none" stroke="#ffffff" strokeWidth="2.5" strokeDasharray="4.2 4.2" />
-                                                <circle cx="20" cy="20" r="8" fill="#ffffff" fillOpacity="0.92" />
-                                                <circle cx="20" cy="20" r="8" fill="none" stroke={chip.color} strokeWidth="1.5" />
-                                            </svg>
-                                                            <div className="flex items-center gap-2 flex-grow">
-                                                                <label className={`${subtextColorClass} text-sm whitespace-nowrap`}>Color:</label>
-                                                                <select
-                                                                    value={chip.color}
-                                                                    onChange={(e) => updateChipDenomination(chip.id, 'color', e.target.value)}
-                                                                    className={`w-28 px-2 py-1 rounded-md ${inputBgClass} ${inputBorderClass} ${subtextColorClass}`}
-                                                                >
-                                                                    {predefinedColors.map(color => (
-                                                                        <option key={color.hex} value={color.hex} style={{ backgroundColor: color.hex, color: (color.name === 'Black' || color.name === 'Maroon' || color.name === 'Indigo') ? 'white' : 'black' }}>
-                                                                            {color.name}
-                                                                        </option>
-                                                                    ))}
-                                                                </select>
-                                                            </div>
-                                                            <div className="flex items-center gap-2">
-                                                                <label className={`${subtextColorClass} text-sm whitespace-nowrap`}>Value:</label>
+                                                    <div key={chip.id} className={`${sectionBgClass} rounded-lg p-2.5 shadow-sm`}>
+                                                        <div className="flex items-center gap-2 flex-wrap">
+                                                            <svg viewBox="0 0 40 40" className="w-8 h-8 shrink-0" style={{ filter: 'drop-shadow(0 2px 3px rgba(0,0,0,0.4))' }}>
+                                                                <circle cx="20" cy="20" r="18" fill={chip.color} stroke="#ffffff" strokeWidth="2" />
+                                                                <circle cx="20" cy="20" r="18" fill="none" stroke="#000000" strokeOpacity="0.15" strokeWidth="1" />
+                                                                <circle cx="20" cy="20" r="13.5" fill="none" stroke="#ffffff" strokeWidth="2.5" strokeDasharray="4.2 4.2" />
+                                                                <circle cx="20" cy="20" r="8" fill="#ffffff" fillOpacity="0.92" />
+                                                                <circle cx="20" cy="20" r="8" fill="none" stroke={chip.color} strokeWidth="1.5" />
+                                                            </svg>
+                                                            <select
+                                                                value={chip.color}
+                                                                onChange={(e) => updateChipDenomination(chip.id, 'color', e.target.value)}
+                                                                className={`w-24 px-1.5 py-1 rounded-md ${inputBgClass} ${inputBorderClass} border ${subtextColorClass} text-xs`}
+                                                            >
+                                                                {predefinedColors.map(color => (
+                                                                    <option key={color.hex} value={color.hex} style={{ backgroundColor: color.hex, color: (color.name === 'Black' || color.name === 'Maroon' || color.name === 'Indigo') ? 'white' : 'black' }}>
+                                                                        {color.name}
+                                                                    </option>
+                                                                ))}
+                                                            </select>
+                                                            <div className="flex items-center gap-1.5">
+                                                                <label className={`text-xs ${subtextColorClass}`}>Value</label>
                                                                 <WheelPicker
                                                                     value={chip.value}
                                                                     onChange={(v) => updateChipDenomination(chip.id, 'value', v)}
                                                                     values={STANDARD_CHIP_DENOMINATIONS}
                                                                     formatValue={(v) => v < 1 ? `$${v.toFixed(2)}` : `$${v.toLocaleString()}`}
-                                                                    width="5rem"
+                                                                    width="4.5rem"
                                                                 />
                                                             </div>
-                                                            <div className="flex items-center gap-2">
-                                                                <label className={`${subtextColorClass} text-sm whitespace-nowrap`}>Owned:</label>
+                                                            <div className="flex items-center gap-1.5">
+                                                                <label className={`text-xs ${subtextColorClass}`}>Owned</label>
                                                                 {isPro ? (
                                                                     <WheelPicker
                                                                         value={chip.quantity ?? 0}
@@ -8313,7 +8304,7 @@ const [lockedFeatureName, setLockedFeatureName] = useState(null);
                                                                         min={0}
                                                                         max={2000}
                                                                         step={20}
-                                                                        width="4.5rem"
+                                                                        width="4rem"
                                                                     />
                                                                 ) : (
                                                                     <span className="text-xs text-gray-500">🔒 Pro</span>
@@ -8321,33 +8312,34 @@ const [lockedFeatureName, setLockedFeatureName] = useState(null);
                                                             </div>
                                                             <button
                                                                 onClick={() => deleteChipDenomination(chip.id)}
-                                                                className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
+                                                                className="ml-auto w-7 h-7 flex items-center justify-center rounded-full bg-red-600/90 hover:bg-red-600 text-white text-sm font-bold shrink-0"
+                                                                aria-label="Remove chip"
                                                             >
-                                                                Remove
+                                                                ✕
                                                             </button>
                                                         </div>
                                                         {isPro && cashDistributions && (cashDistributions.min || cashDistributions.mid || cashDistributions.max) && (
-                                                            <div className="flex flex-wrap gap-2 pt-1 border-t border-white/5">
+                                                            <div className="flex flex-wrap gap-1.5 mt-2 pt-2 border-t border-white/5">
                                                                 {cashDistributions.min && (
-                                                                    <span className="inline-flex items-center justify-center px-3 py-1 rounded-full bg-cyan-600/20 border border-cyan-500/40 text-xs font-semibold text-cyan-300">
+                                                                    <span className="inline-flex items-center justify-center px-2.5 py-0.5 rounded-full bg-cyan-600/20 border border-cyan-500/40 text-xs font-semibold text-cyan-300">
                                                                         Min: {getCashPerPlayerCountForChip(cashDistributions.min, chip.id)}/player
                                                                     </span>
                                                                 )}
                                                                 {cashDistributions.mid && (
-                                                                    <span className="inline-flex items-center justify-center px-3 py-1 rounded-full bg-cyan-600/20 border border-cyan-500/40 text-xs font-semibold text-cyan-300">
+                                                                    <span className="inline-flex items-center justify-center px-2.5 py-0.5 rounded-full bg-cyan-600/20 border border-cyan-500/40 text-xs font-semibold text-cyan-300">
                                                                         Mid: {getCashPerPlayerCountForChip(cashDistributions.mid, chip.id)}/player
                                                                     </span>
                                                                 )}
                                                                 {cashDistributions.max && (
-                                                                    <span className="inline-flex items-center justify-center px-3 py-1 rounded-full bg-cyan-600/20 border border-cyan-500/40 text-xs font-semibold text-cyan-300">
+                                                                    <span className="inline-flex items-center justify-center px-2.5 py-0.5 rounded-full bg-cyan-600/20 border border-cyan-500/40 text-xs font-semibold text-cyan-300">
                                                                         Max: {getCashPerPlayerCountForChip(cashDistributions.max, chip.id)}/player
                                                                     </span>
                                                                 )}
                                                             </div>
                                                         )}
                                                         {!isPro && (
-                                                            <div className="flex pt-1 border-t border-white/5">
-                                                                <span className="inline-flex items-center justify-center px-3 py-1 rounded-full bg-gray-600/40 border border-gray-500/40 text-xs font-semibold text-gray-400">
+                                                            <div className="flex mt-2 pt-2 border-t border-white/5">
+                                                                <span className="inline-flex items-center justify-center px-2.5 py-0.5 rounded-full bg-gray-600/40 border border-gray-500/40 text-xs font-semibold text-gray-400">
                                                                     🔒 Pro
                                                                 </span>
                                                             </div>
