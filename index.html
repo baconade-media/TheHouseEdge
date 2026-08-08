@@ -3238,6 +3238,10 @@
             useEffect(() => {
                 localStorage.setItem('tournamentColorScheme', tournamentColorScheme);
             }, [tournamentColorScheme]);
+            const [tournamentLayoutStyle, setTournamentLayoutStyle] = useState(() => localStorage.getItem('tournamentLayoutStyle') || 'classic'); // 'classic' | 'focus' | 'centered'
+            useEffect(() => {
+                localStorage.setItem('tournamentLayoutStyle', tournamentLayoutStyle);
+            }, [tournamentLayoutStyle]);
 
             // Further customization on top of the chosen scheme: an optional
             // custom card color (or fully transparent), a custom text color, and
@@ -4720,6 +4724,32 @@ const getPerPlayerCountForChip = (chipId) => {
 					};
 
 
+            // Layout style drives sizing/visibility/arrangement of the SAME
+            // elements below, rather than duplicating the whole screen three
+            // times -- keeps all three layouts automatically in sync with any
+            // future changes to themes, fonts, logo, zoom, etc.
+            const isFocusLayout = tournamentLayoutStyle === 'focus';
+            const isCenteredLayout = tournamentLayoutStyle === 'centered';
+            const clockSizeClass = isFocusLayout
+                ? 'text-8xl md:text-9xl'
+                : isCenteredLayout
+                    ? 'text-7xl md:text-8xl lg:text-9xl'
+                    : 'text-6xl md:text-7xl lg:text-8xl';
+            const blindsSizeClass = (isFocusLayout || isCenteredLayout)
+                ? 'text-5xl md:text-6xl'
+                : 'text-4xl md:text-5xl';
+            const anteSizeClass = (isFocusLayout || isCenteredLayout)
+                ? 'text-4xl md:text-5xl'
+                : 'text-3xl md:text-4xl';
+            const showSecondaryInfo = !isFocusLayout; // Next Level card + Rebuy/End Time card
+            const showPayoutsList = !isFocusLayout; // The detailed payout breakdown list is hidden on Focus -- the prize pool total and buy-in/rebuy/add-on buttons stay visible everywhere since they're functional controls, not just info
+            const clockColumnLayoutClass = isCenteredLayout
+                ? 'flex flex-col items-center w-full'
+                : 'flex flex-col items-center w-full md:w-1/2 mb-3 md:mb-0';
+            const columnsWrapperClass = isCenteredLayout
+                ? 'flex flex-col items-center w-full gap-y-4 mb-3'
+                : 'flex flex-col md:flex-row items-start md:justify-center w-full gap-x-8 mb-3';
+
             return (
                 <div
                     className={`tournament-scoped ${mainCardBgClass} p-5 rounded-2xl shadow-2xl w-[92vw] max-w-[1400px] flex flex-col transition-colors duration-500 relative`}
@@ -4752,12 +4782,12 @@ const getPerPlayerCountForChip = (chipId) => {
                     <div className="w-full flex flex-col items-center justify-center mb-3"> {/* Reduced mb-4 to mb-3 */}
                         <h1 className={`text-4xl font-bold text-center mb-3 font-outfit ${headingTextColorClass}`}>{tournamentTitle}</h1> {/* Replaced static title with state variable */}
 
-                        <div className="flex flex-col md:flex-row items-start md:justify-center w-full gap-x-8 mb-3"> {/* Reduced mb-4 to mb-3 */}
+                        <div className={columnsWrapperClass}>
                             {/* Tournament Clock Section */}
-                            <div className="flex flex-col items-center w-full md:w-1/2 mb-3 md:mb-0"> {/* Reduced mb-4 to mb-3 */}
+                            <div className={clockColumnLayoutClass}>
                                 <div className="text-center mb-4 w-full"> {/* Reduced mb-6 to mb-4 */}
                                     {currentLevel ? (
-                                        <div className={`text-6xl md:text-7xl lg:text-8xl font-sans tracking-wide ${sectionBgClass} px-4 py-1 rounded-xl shadow-inner inline-block transition-colors duration-500`}> {/* Reduced px-6 py-2 to px-4 py-1. Font size adjustment: lg:text-8xl retained, but md and default reduced*/}
+                                        <div className={`${clockSizeClass} font-sans tracking-wide ${sectionBgClass} px-4 py-1 rounded-xl shadow-inner inline-block transition-colors duration-500`}> {/* Reduced px-6 py-2 to px-4 py-1 */}
                                             {formatTime(timeRemaining)}
                                         </div>
                                     ) : (
@@ -4774,11 +4804,11 @@ const getPerPlayerCountForChip = (chipId) => {
                                         ) : (
                                             <>
                                                 {/* Reduced text-5xl to text-4xl and md:text-6xl to md:text-5xl */}
-                                                <p className="text-4xl md:text-5xl font-bold text-center font-outfit text-yellow-400">
+                                                <p className={`${blindsSizeClass} font-bold text-center font-outfit text-yellow-400`}>
 												  Blinds: {formatBlind(currentLevel.sb)}/{formatBlind(currentLevel.bb)}
 												</p>
 												{currentLevel.ante > 0 && (
-												  <p className="text-3xl md:text-4xl font-bold text-center font-outfit text-yellow-400 mt-1">
+												  <p className={`${anteSizeClass} font-bold text-center font-outfit text-yellow-400 mt-1`}>
 													Ante: {currentLevel.ante}
 												  </p>
 												)}
@@ -4794,7 +4824,7 @@ const getPerPlayerCountForChip = (chipId) => {
                                 )}
 
                                 {/* Next Level Information */}
-                                {nextLevelData && (
+                                {showSecondaryInfo && nextLevelData && (
                                     <div className={`mb-3 p-2 rounded-lg w-full max-w-md mx-auto ${inputBgClass} border ${inputBorderClass} transition-colors duration-500`}>
                                         {/* Reduced mb-4 to mb-3 and p-3 to p-2 */}
                                         {/* Reduced text-xl to text-lg */}
@@ -4812,6 +4842,7 @@ const getPerPlayerCountForChip = (chipId) => {
                                 )}
 
                                 {/* Rebuy Timer and Tournament End Timer Information */}
+                                {showSecondaryInfo && (
                                 <div className={`mb-4 p-2 rounded-lg w-full max-w-md mx-auto ${inputBgClass} border ${inputBorderClass} transition-colors duration-500`}>
                                     {rebuyEndsAfterLevelIndex !== -1 && rebuyTimeRemaining > 0 && currentLevelIndex <= rebuyEndsAfterLevelIndex ? (
                                         <p className={`text-base text-center font-semibold ${subtextColorClass}`}>
@@ -4851,10 +4882,11 @@ const getPerPlayerCountForChip = (chipId) => {
                                         </div>
                                     )}
                                 </div>
+                                )}
                             </div>
 
                             {/* Prize Pool & Buy-in/Rebuy/Add-on Display on Main Page */}
-                            <div className={`p-3 rounded-lg w-full md:w-1/2 md:max-w-md mx-auto ${sectionBgClass} transition-colors duration-500 md:mt-auto`}>
+                            <div className={`p-3 rounded-lg w-full ${isCenteredLayout ? 'max-w-xl mx-auto' : 'md:w-1/2 md:max-w-md mx-auto'} ${sectionBgClass} transition-colors duration-500 ${isCenteredLayout ? '' : 'md:mt-auto'}`}>
                                 <h3 className={`text-lg font-bold text-center mb-3 ${headingTextColorClass}`}>
                                     Total Prize Pool: <span className="font-semibold">${totalPrizePool.toLocaleString()}</span>
                                 </h3>
@@ -4884,7 +4916,7 @@ const getPerPlayerCountForChip = (chipId) => {
                                 </div>
 
                                 {/* Display Payout Structure on main screen */}
-                                {payoutStructure.length > 0 && (
+                                {showPayoutsList && payoutStructure.length > 0 && (
                                     <div className="mt-4 border-t border-gray-500 pt-4 flex flex-col items-center w-full">
                                         <div className="flex flex-col space-y-1 w-full max-w-xs">
                                             {payoutStructure.sort((a, b) => a.place - b.place).map((payout) => (
@@ -6000,6 +6032,27 @@ const getPerPlayerCountForChip = (chipId) => {
                                 {tournamentSettingsSubView === 'visual' && (
                                     <>
                                         <div className="flex flex-col space-y-6">
+                                            {/* --- Layout style --- */}
+                                            <div>
+                                                <label className={`text-sm font-semibold ${subtextColorClass} block mb-2`}>Layout Style</label>
+                                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                                    {[
+                                                        { key: 'classic', name: 'Classic', desc: 'Everything visible, side by side' },
+                                                        { key: 'centered', name: 'Centered', desc: 'Bigger clock, single centered column' },
+                                                        { key: 'focus', name: 'Focus', desc: 'Just the clock and blinds, nothing else' },
+                                                    ].map(opt => (
+                                                        <button
+                                                            key={opt.key}
+                                                            onClick={() => setTournamentLayoutStyle(opt.key)}
+                                                            className={`rounded-lg p-3 text-left border-2 transition-all ${sectionBgClass} ${tournamentLayoutStyle === opt.key ? 'border-blue-500' : 'border-transparent'}`}
+                                                        >
+                                                            <p className={`text-sm font-bold ${headingTextColorClass}`}>{opt.name}</p>
+                                                            <p className={`text-xs mt-0.5 ${subtextColorClass}`}>{opt.desc}</p>
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+
                                             {/* --- Background color scheme --- */}
                                             <div>
                                                 <label className={`text-sm font-semibold ${subtextColorClass} block mb-2`}>Background Color Scheme</label>
