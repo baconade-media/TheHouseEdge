@@ -1633,30 +1633,85 @@
          * layered on top, to get back to the rest of the app.
          */
         const TrackingView = ({ onBackToHome }) => {
-            // The iframe is same-origin (no sandbox attribute), so it shares the exact
-            // same localStorage as the rest of the app -- the existing cloud-pull-on-login
-            // logic already restores the tracker's roster/history automatically. The only
-            // extra step needed is to make sure the tracker's OWN writes (via its own,
-            // separate `window` object inside the iframe) also trigger a cloud push,
-            // since our earlier patch on the parent window's localStorage.setItem doesn't
-            // reach into the iframe's separate realm.
+            // IMPORTANT: a same-origin srcDoc iframe is NOT guaranteed to
+            // actually share the same localStorage partition as its parent --
+            // this used to be assumed here, but it's a real, documented
+            // failure mode (confirmed on Safari 18, and increasingly on other
+            // browsers too, via "storage partitioning" for privacy). The
+            // practical symptom: the tracker's data looks fine all session
+            // long (same page load, same in-memory storage), then is gone on
+            // the next visit (fresh page load, browser hands the iframe a
+            // fresh/isolated storage bucket instead of the previous one).
+            //
+            // The fix: never treat the iframe's own localStorage as the
+            // source of truth. Instead:
+            //  1. Load the iframe empty first (not with the tracker yet).
+            //  2. Copy the tracker's known keys from the PARENT's reliable,
+            //     cloud-synced localStorage into the iframe's storage.
+            //  3. THEN inject the actual tracker app into that same,
+            //     now-pre-populated window via document.write -- since this
+            //     keeps the same window/storage context rather than causing a
+            //     new navigation, the tracker's synchronous
+            //     localStorage.getItem calls at startup see the
+            //     correct, restored data immediately.
+            //  4. Every write the tracker makes afterward is mirrored
+            //     directly into the parent's own localStorage too, not just
+            //     used as a trigger to push whatever's already there, so the
+            //     parent's storage -- and the cloud backup -- always has the
+            //     tracker's latest data regardless of whether the iframe's
+            //     own copy survives to the next reload.
+            const TRACKER_STORAGE_KEYS = [
+                'poker_pro_roster',
+                'poker_pro_history',
+                'pokerAppContacts',
+                'pokerAppInvites',
+                'poker_pro_active_session',
+            ];
+
             const handleIframeLoad = (e) => {
                 try {
                     const iframeWindow = e.target.contentWindow;
+
+                    // Already-injected guard: document.write below triggers
+                    // this onLoad handler a second time (once for the initial
+                    // blank load, once for the injected content) -- only do
+                    // the restore+inject dance on the FIRST (blank) load.
+                    if (iframeWindow.__trackerInjected) {
+                        return;
+                    }
+
+                    // Step 2: restore from the parent's own reliable storage.
+                    TRACKER_STORAGE_KEYS.forEach(key => {
+                        const value = window.localStorage.getItem(key);
+                        if (value !== null) {
+                            iframeWindow.localStorage.setItem(key, value);
+                        }
+                    });
+
+                    // Step 4: mirror every future write straight into the
+                    // parent's own localStorage (using the parent's already
+                    // cloud-sync-patched setItem), not just as a trigger.
                     const original = iframeWindow.localStorage.setItem.bind(iframeWindow.localStorage);
                     iframeWindow.localStorage.setItem = function (key, value) {
                         original(key, value);
-                        if (window.__pushToCloud) window.__pushToCloud();
+                        if (TRACKER_STORAGE_KEYS.includes(key)) {
+                            window.localStorage.setItem(key, value); // parent's patched setItem -- queues the real cloud push with the correct data
+                        }
                     };
+
+                    // Step 3: inject the actual tracker app now that storage is primed.
+                    iframeWindow.__trackerInjected = true;
+                    iframeWindow.document.open();
+                    iframeWindow.document.write(TRACKER_HTML);
+                    iframeWindow.document.close();
                 } catch (err) {
-                    console.error('Could not hook into Tracking app storage for cloud sync:', err);
+                    console.error('Could not set up Tracking app storage bridge:', err);
                 }
             };
 
             return (
                 <div style={{ position: 'fixed', inset: 0, zIndex: 30 }}>
                     <iframe
-                        srcDoc={TRACKER_HTML}
                         title="Poker Logbook"
                         onLoad={handleIframeLoad}
                         style={{ width: '100%', height: '100%', border: 'none', display: 'block' }}
@@ -3131,8 +3186,10 @@
             useEffect(() => {
                 localStorage.setItem('tournamentLiveSyncEnabled', JSON.stringify(liveSyncEnabled));
             }, [liveSyncEnabled]);
-            const lastSyncPushAtRef = useRef(0);
+            const lastTimerPushAtRef = useRef(0);
+            const lastDataPushAtRef = useRef(0);
             const hasMountedSyncRef = useRef(false);
+            const hasMountedDataSyncRef = useRef(false);
 
 
             // New states for Payout structure
@@ -3668,43 +3725,67 @@ stack = Math.round(stack / roundingUnit) * roundingUnit;
                     currentLevelIndex,
                     timeRemaining,
                     isRunning,
+                    timerUpdatedAt: Date.now(),
+                };
+                lastTimerPushAtRef.current = payload.timerUpdatedAt;
+                window.__firebaseDb.collection('liveClockSync').doc(`${authUser.uid}_tournament`)
+                    .set(payload, { merge: true })
+                    .then(() => setLiveSyncActive(true))
+                    .catch(e => console.error('Clock sync push failed:', e));
+                // eslint-disable-next-line react-hooks/exhaustive-deps
+            }, [isRunning, currentLevelIndex, syncNonce, isPro, authUser, liveSyncEnabled]);
+
+            // Push payout/player-count data separately -- never includes
+            // timeRemaining/isRunning/currentLevelIndex, so a payout or
+            // player-count change on one device can never overwrite the
+            // running timer on other devices with this device's own
+            // (possibly stale) values. That was a real bug: bundling
+            // everything into one push meant editing payouts or bumping the
+            // player count silently reset the timer on every synced screen.
+            useEffect(() => {
+                if (!isPro || !authUser || !liveSyncEnabled) return;
+                if (!hasMountedDataSyncRef.current) { hasMountedDataSyncRef.current = true; return; }
+                const payload = {
                     payoutStructure,
                     numPlayers,
                     rebuyCount,
                     addOnCount,
-                    updatedAt: Date.now(),
+                    dataUpdatedAt: Date.now(),
                 };
-                lastSyncPushAtRef.current = payload.updatedAt;
+                lastDataPushAtRef.current = payload.dataUpdatedAt;
                 window.__firebaseDb.collection('liveClockSync').doc(`${authUser.uid}_tournament`)
-                    .set(payload)
-                    .then(() => setLiveSyncActive(true))
-                    .catch(e => console.error('Clock sync push failed:', e));
+                    .set(payload, { merge: true })
+                    .catch(e => console.error('Clock data sync push failed:', e));
                 // eslint-disable-next-line react-hooks/exhaustive-deps
-            }, [isRunning, currentLevelIndex, syncNonce, isPro, authUser, liveSyncEnabled, payoutStructure, numPlayers, rebuyCount, addOnCount]);
+            }, [isPro, authUser, liveSyncEnabled, payoutStructure, numPlayers, rebuyCount, addOnCount]);
 
             // Effect 2c: Listen for clock state pushed from another device.
-            // Firestore's snapshot.metadata.hasPendingWrites tells us whether a
-            // given snapshot is our own not-yet-confirmed write (skip it, we
-            // already applied it locally) or a genuinely remote change (apply it).
+            // Timer fields and data fields are checked against their own
+            // separate timestamps, since they now arrive as independent writes.
             useEffect(() => {
                 if (!isPro || !authUser || !liveSyncEnabled) return;
                 const unsubscribe = window.__firebaseDb.collection('liveClockSync').doc(`${authUser.uid}_tournament`)
                     .onSnapshot(snapshot => {
                         if (snapshot.metadata.hasPendingWrites) return;
                         const data = snapshot.data();
-                        if (!data || data.updatedAt === lastSyncPushAtRef.current) return;
+                        if (!data) return;
 
-                        const elapsedSec = data.isRunning ? Math.max(0, Math.floor((Date.now() - data.updatedAt) / 1000)) : 0;
-                        const adjustedTime = Math.max(0, (data.timeRemaining || 0) - elapsedSec);
+                        if (typeof data.timerUpdatedAt === 'number' && data.timerUpdatedAt !== lastTimerPushAtRef.current) {
+                            const elapsedSec = data.isRunning ? Math.max(0, Math.floor((Date.now() - data.timerUpdatedAt) / 1000)) : 0;
+                            const adjustedTime = Math.max(0, (data.timeRemaining || 0) - elapsedSec);
+                            setCurrentLevelIndex(data.currentLevelIndex ?? 0);
+                            setTimeRemaining(adjustedTime);
+                            setIsRunning(!!data.isRunning);
+                            setLiveSyncActive(true);
+                        }
 
-                        setCurrentLevelIndex(data.currentLevelIndex ?? 0);
-                        setTimeRemaining(adjustedTime);
-                        setIsRunning(!!data.isRunning);
-                        if (Array.isArray(data.payoutStructure)) setPayoutStructure(data.payoutStructure);
-                        if (typeof data.numPlayers === 'number') setNumPlayers(data.numPlayers);
-                        if (typeof data.rebuyCount === 'number') setRebuyCount(data.rebuyCount);
-                        if (typeof data.addOnCount === 'number') setAddOnCount(data.addOnCount);
-                        setLiveSyncActive(true);
+                        if (typeof data.dataUpdatedAt === 'number' && data.dataUpdatedAt !== lastDataPushAtRef.current) {
+                            if (Array.isArray(data.payoutStructure)) setPayoutStructure(data.payoutStructure);
+                            if (typeof data.numPlayers === 'number') setNumPlayers(data.numPlayers);
+                            if (typeof data.rebuyCount === 'number') setRebuyCount(data.rebuyCount);
+                            if (typeof data.addOnCount === 'number') setAddOnCount(data.addOnCount);
+                            setLiveSyncActive(true);
+                        }
                     }, e => console.error('Clock sync listener error:', e));
                 return () => unsubscribe();
             }, [isPro, authUser]);
@@ -4750,6 +4831,104 @@ const getPerPlayerCountForChip = (chipId) => {
                 ? 'flex flex-col items-center w-full gap-y-4 mb-3'
                 : 'flex flex-col md:flex-row items-start md:justify-center w-full gap-x-8 mb-3';
 
+            // Next Level card + Rebuy/End Time card -- on Classic/Focus these
+            // sit under the clock; on Centered they move into their own left
+            // column instead.
+            const nextLevelAndRebuyJSX = showSecondaryInfo && (
+                <>
+                    {nextLevelData && (
+                        <div className={`mb-3 p-2 rounded-lg w-full max-w-md mx-auto ${inputBgClass} border ${inputBorderClass} transition-colors duration-500`}>
+                            <h3 className={`text-xl font-bold text-center ${headingTextColorClass}`}>Next Level:</h3>
+                            {nextLevelData.isBreak ? (
+                                <p className={`text-2xl text-center ${subtextColorClass}`}>{nextLevelData.name} ({nextLevelData.duration} min)</p>
+                            ) : (
+                                <p className={`text-2xl text-center ${subtextColorClass}`}>
+                                    Blinds: {nextLevelData.sb}/{nextLevelData.bb} {nextLevelData.ante > 0 ? `(Ante: ${currentLevel.ante})` : ''} ({nextLevelData.duration} min)
+                                </p>
+                            )}
+                        </div>
+                    )}
+                    <div className={`mb-4 p-2 rounded-lg w-full max-w-md mx-auto ${inputBgClass} border ${inputBorderClass} transition-colors duration-500`}>
+                        {rebuyEndsAfterLevelIndex !== -1 && rebuyTimeRemaining > 0 && currentLevelIndex <= rebuyEndsAfterLevelIndex ? (
+                            <p className={`text-base text-center font-semibold ${subtextColorClass}`}>
+                                Rebuy Period Ends In: {" "}
+                                <span className="font-semibold">{formatHoursMinutes(rebuyTimeRemaining)}</span>
+                            </p>
+                        ) : rebuyEndsAfterLevelIndex !== -1 && rebuyTimeRemaining === 0 && currentLevelIndex <= rebuyEndsAfterLevelIndex ? (
+                            <p className={`text-base text-center font-semibold text-red-500`}>Rebuy Period Ending Soon!</p>
+                        ) : rebuyEndsAfterLevelIndex !== -1 && currentLevelIndex > rebuyEndsAfterLevelIndex ? (
+                            <p className={`text-base text-center font-semibold ${placeholderColorClass}`}>Rebuy Period Ended</p>
+                        ) : (
+                            <p className={`text-base text-center font-semibold ${placeholderColorClass}`}>No Rebuy Period Set</p>
+                        )}
+                        {showTournamentEndTime && (
+                            <div className="mt-2 pt-2 border-t border-gray-500">
+                                {tournamentEndTimeDisplayMode === 'localTime' && tournamentEndTime ? (
+                                    <p className={`text-base text-center font-semibold ${subtextColorClass}`}>
+                                        Tournament Ends At: {tournamentEndTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </p>
+                                ) : (
+                                    <p className={`text-base text-center font-semibold ${subtextColorClass}`}>
+                                        Total Time Left: {" "}
+                                        <span className="font-semibold">{formatHoursMinutes(remainingTournamentDuration)}</span>
+                                    </p>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </>
+            );
+
+            // Just the Total Prize Pool header + payout breakdown, no
+            // buy-in/rebuy/add-on buttons -- this is what goes in the right
+            // column on Centered specifically, per the user's request.
+            const prizePoolHeaderJSX = (
+                <h3 className={`text-lg font-bold text-center mb-3 ${headingTextColorClass}`}>
+                    Total Prize Pool: <span className="font-semibold">${totalPrizePool.toLocaleString()}</span>
+                </h3>
+            );
+            const payoutsListJSX = showPayoutsList && payoutStructure.length > 0 && (
+                <div className="mt-4 border-t border-gray-500 pt-4 flex flex-col items-center w-full">
+                    <div className="flex flex-col space-y-1 w-full max-w-xs">
+                        {payoutStructure.sort((a, b) => a.place - b.place).map((payout) => (
+                            <div key={payout.id} className="flex items-center text-xl justify-center">
+                                <span className={`${subtextColorClass} font-semibold w-28 text-right`}>
+                                    {payout.place}{payout.place === 1 ? 'st' : payout.place === 2 ? 'nd' : payout.place === 3 ? 'rd' : 'th'} Place:
+                                </span>
+                                <span className={`font-semibold ${subtextColorClass} w-28 text-left ml-4`}>
+                                    ${roundPayoutAmount((payout.percentage / 100) * totalPrizePool).toLocaleString()}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+
+            // The functional Buy-in/Rebuy/Add-on controls -- kept separate
+            // from the payouts display since these are actions, not info.
+            const buyInButtonsJSX = (
+                <div className="flex flex-col sm:flex-row justify-center gap-2 w-full mt-3">
+                    <div className="flex-1 flex flex-col items-center">
+                        <button onClick={handleLateRegistrationBuyIn} disabled={buyInAmount === 0} className="w-full px-5 py-2.5 h-12 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center text-center whitespace-nowrap">
+                            Buy-in (${buyInAmount})
+                        </button>
+                        <p className={`${subtextColorClass} text-xs mt-0.5`}>Total Buy-ins: {numPlayers}</p>
+                    </div>
+                    <div className="flex-1 flex flex-col items-center">
+                        <button onClick={handleRebuy} disabled={rebuyAmount === 0} className="w-full px-5 py-2.5 h-12 bg-orange-600 hover:bg-orange-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center text-center whitespace-nowrap">
+                            Rebuy (${rebuyAmount})
+                        </button>
+                        <p className={`${subtextColorClass} text-xs mt-0.5`}>Total Rebuys: {rebuyCount}</p>
+                    </div>
+                    <div className="flex-1 flex flex-col items-center">
+                        <button onClick={handleAddOn} disabled={addOnAmount === 0} className="w-full px-5 py-2.5 h-12 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center text-center whitespace-nowrap">
+                            Add-On (${addOnAmount})
+                        </button>
+                        <p className={`${subtextColorClass} text-xs mt-0.5`}>Total Add-ons: {addOnCount}</p>
+                    </div>
+                </div>
+            );
+
             return (
                 <div
                     className={`tournament-scoped ${mainCardBgClass} p-5 rounded-2xl shadow-2xl w-[92vw] max-w-[1400px] flex flex-col transition-colors duration-500 relative`}
@@ -4785,9 +4964,9 @@ const getPerPlayerCountForChip = (chipId) => {
                         <div className={columnsWrapperClass}>
                             {/* Tournament Clock Section */}
                             <div className={clockColumnLayoutClass}>
-                                <div className="text-center mb-4 w-full"> {/* Reduced mb-6 to mb-4 */}
+                                <div className="text-center mb-4 w-full">
                                     {currentLevel ? (
-                                        <div className={`${clockSizeClass} font-sans tracking-wide ${sectionBgClass} px-4 py-1 rounded-xl shadow-inner inline-block transition-colors duration-500`}> {/* Reduced px-6 py-2 to px-4 py-1 */}
+                                        <div className={`${clockSizeClass} font-sans tracking-wide ${sectionBgClass} px-4 py-1 rounded-xl shadow-inner inline-block transition-colors duration-500`}>
                                             {formatTime(timeRemaining)}
                                         </div>
                                     ) : (
@@ -4797,24 +4976,18 @@ const getPerPlayerCountForChip = (chipId) => {
 
                                 {currentLevel && (
                                     <div className={`mb-4 p-2 rounded-lg w-full max-w-md md:max-w-xl mx-auto ${sectionBgClass} transition-colors duration-500`}>
-                                        {/* Reduced mb-6 to mb-4 and p-3 to p-2 */}
                                         {currentLevel.isBreak ? (
-                                            /* Reduced text-4xl to text-3xl */
                                             <h2 className={`text-3xl font-bold text-center ${headingTextColorClass} font-outfit`}>{currentLevel.name}</h2>
                                         ) : (
                                             <>
-                                                {/* Reduced text-5xl to text-4xl and md:text-6xl to md:text-5xl */}
                                                 <p className={`${blindsSizeClass} font-bold text-center font-outfit text-yellow-400`}>
-												  Blinds: {formatBlind(currentLevel.sb)}/{formatBlind(currentLevel.bb)}
-												</p>
-												{currentLevel.ante > 0 && (
-												  <p className={`${anteSizeClass} font-bold text-center font-outfit text-yellow-400 mt-1`}>
-													Ante: {currentLevel.ante}
-												  </p>
-												)}
-
-
-                                                {/* Reduced text-3xl to text-2xl and md:text-4xl to md:text-3xl */}
+                                                  Blinds: {formatBlind(currentLevel.sb)}/{formatBlind(currentLevel.bb)}
+                                                </p>
+                                                {currentLevel.ante > 0 && (
+                                                  <p className={`${anteSizeClass} font-bold text-center font-outfit text-yellow-400 mt-1`}>
+                                                    Ante: {currentLevel.ante}
+                                                  </p>
+                                                )}
                                                 <p className={`text-2xl md:text-3xl text-center ${subtextColorClass}`}>
                                                     Level {currentLevelIndex + 1}
                                                 </p>
@@ -4823,117 +4996,41 @@ const getPerPlayerCountForChip = (chipId) => {
                                     </div>
                                 )}
 
-                                {/* Next Level Information */}
-                                {showSecondaryInfo && nextLevelData && (
-                                    <div className={`mb-3 p-2 rounded-lg w-full max-w-md mx-auto ${inputBgClass} border ${inputBorderClass} transition-colors duration-500`}>
-                                        {/* Reduced mb-4 to mb-3 and p-3 to p-2 */}
-                                        {/* Reduced text-xl to text-lg */}
-                                        <h3 className={`text-xl font-bold text-center ${headingTextColorClass}`}>Next Level:</h3>
-                                        {nextLevelData.isBreak ? (
-                                            /* Reduced text-xl to text-base */
-                                            <p className={`text-2xl text-center ${subtextColorClass}`}>{nextLevelData.name} ({nextLevelData.duration} min)</p>
-                                        ) : (
-                                            /* Removed $ from blinds as per user request */
-                                            <p className={`text-2xl text-center ${subtextColorClass}`}>
-                                                Blinds: {nextLevelData.sb}/{nextLevelData.bb} {nextLevelData.ante > 0 ? `(Ante: ${currentLevel.ante})` : ''} ({nextLevelData.duration} min)
-                                            </p>
-                                        )}
-                                    </div>
-                                )}
-
-                                {/* Rebuy Timer and Tournament End Timer Information */}
-                                {showSecondaryInfo && (
-                                <div className={`mb-4 p-2 rounded-lg w-full max-w-md mx-auto ${inputBgClass} border ${inputBorderClass} transition-colors duration-500`}>
-                                    {rebuyEndsAfterLevelIndex !== -1 && rebuyTimeRemaining > 0 && currentLevelIndex <= rebuyEndsAfterLevelIndex ? (
-                                        <p className={`text-base text-center font-semibold ${subtextColorClass}`}>
-                                            Rebuy Period Ends In: {" "}
-											<span className="font-semibold">
-											  {formatHoursMinutes(rebuyTimeRemaining)}
-											</span>
-                                        </p>
-                                    ) : rebuyEndsAfterLevelIndex !== -1 && rebuyTimeRemaining === 0 && currentLevelIndex <= rebuyEndsAfterLevelIndex ? (
-                                        <p className={`text-base text-center font-semibold text-red-500`}>
-                                            Rebuy Period Ending Soon!
-                                        </p>
-                                    ) : rebuyEndsAfterLevelIndex !== -1 && currentLevelIndex > rebuyEndsAfterLevelIndex ? (
-                                        <p className={`text-base text-center font-semibold ${placeholderColorClass}`}>
-                                            Rebuy Period Ended
-                                        </p>
-                                    ) : (
-                                        <p className={`text-base text-center font-semibold ${placeholderColorClass}`}>
-                                            No Rebuy Period Set
-                                        </p>
-                                    )}
-
-                                    {showTournamentEndTime && (
-                                        <div className="mt-2 pt-2 border-t border-gray-500">
-                                            {tournamentEndTimeDisplayMode === 'localTime' && tournamentEndTime ? (
-                                                <p className={`text-base text-center font-semibold ${subtextColorClass}`}>
-                                                    Tournament Ends At: {tournamentEndTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                                </p>
-                                            ) : (
-                                                <p className={`text-base text-center font-semibold ${subtextColorClass}`}>
-                                                    Total Time Left: {" "}
-													<span className="font-semibold">
-													  {formatHoursMinutes(remainingTournamentDuration)}
-													</span>
-                                                </p>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
-                                )}
+                                {!isCenteredLayout && nextLevelAndRebuyJSX}
                             </div>
 
-                            {/* Prize Pool & Buy-in/Rebuy/Add-on Display on Main Page */}
-                            <div className={`p-3 rounded-lg w-full ${isCenteredLayout ? 'max-w-xl mx-auto' : 'md:w-1/2 md:max-w-md mx-auto'} ${sectionBgClass} transition-colors duration-500 ${isCenteredLayout ? '' : 'md:mt-auto'}`}>
-                                <h3 className={`text-lg font-bold text-center mb-3 ${headingTextColorClass}`}>
-                                    Total Prize Pool: <span className="font-semibold">${totalPrizePool.toLocaleString()}</span>
-                                </h3>
-                                {/* Buttons for Buy-in, Rebuy, Add-on */}
-                                <div className="flex flex-col sm:flex-row justify-center gap-2 w-full mt-3">
-                                    {/* Container for Buy-in button and its count */}
-                                    <div className="flex-1 flex flex-col items-center">
-                                        <button onClick={handleLateRegistrationBuyIn} disabled={buyInAmount === 0} className="w-full px-5 py-2.5 h-12 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center text-center whitespace-nowrap">
-                                            Buy-in (${buyInAmount})
-                                        </button>
-                                        <p className={`${subtextColorClass} text-xs mt-0.5`}>Total Buy-ins: {numPlayers}</p>
-                                    </div>
-                                    {/* Container for Rebuy button and its count */}
-                                    <div className="flex-1 flex flex-col items-center">
-                                        <button onClick={handleRebuy} disabled={rebuyAmount === 0} className="w-full px-5 py-2.5 h-12 bg-orange-600 hover:bg-orange-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center text-center whitespace-nowrap">
-                                            Rebuy (${rebuyAmount})
-                                        </button>
-                                        <p className={`${subtextColorClass} text-xs mt-0.5`}>Total Rebuys: {rebuyCount}</p>
-                                    </div>
-                                    {/* Container for Add-On button and its count */}
-                                    <div className="flex-1 flex flex-col items-center">
-                                        <button onClick={handleAddOn} disabled={addOnAmount === 0} className="w-full px-5 py-2.5 h-12 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center text-center whitespace-nowrap">
-                                            Add-On (${addOnAmount})
-                                        </button>
-                                        <p className={`${subtextColorClass} text-xs mt-0.5`}>Total Add-ons: {addOnCount}</p>
-                                    </div>
-                                </div>
-
-                                {/* Display Payout Structure on main screen */}
-                                {showPayoutsList && payoutStructure.length > 0 && (
-                                    <div className="mt-4 border-t border-gray-500 pt-4 flex flex-col items-center w-full">
-                                        <div className="flex flex-col space-y-1 w-full max-w-xs">
-                                            {payoutStructure.sort((a, b) => a.place - b.place).map((payout) => (
-                                                <div key={payout.id} className="flex items-center text-xl justify-center">
-                                                    <span className={`${subtextColorClass} font-semibold w-28 text-right`}> {/* Increased width to w-28, kept text-right */}
-                                                        {payout.place}{payout.place === 1 ? 'st' : payout.place === 2 ? 'nd' : payout.place === 3 ? 'rd' : 'th'} Place:
-                                                    </span>
-                                                    <span className={`font-semibold ${subtextColorClass} w-28 text-left ml-4`}> {/* Increased width to w-28, added ml-4 */}
-                                                        ${roundPayoutAmount((payout.percentage / 100) * totalPrizePool).toLocaleString()}
-                                                    </span>
-                                                </div>
-                                            ))}
+                            {isCenteredLayout ? (
+                                !isFocusLayout && (
+                                    <div className="flex flex-col md:flex-row w-full gap-4">
+                                        <div className="md:w-1/2 flex flex-col items-center">
+                                            {nextLevelAndRebuyJSX}
+                                        </div>
+                                        <div className="md:w-1/2 flex flex-col items-center">
+                                            <div className={`p-3 rounded-lg w-full ${sectionBgClass} transition-colors duration-500`}>
+                                                {prizePoolHeaderJSX}
+                                                {payoutsListJSX}
+                                            </div>
                                         </div>
                                     </div>
-                                )}
-                            </div>
+                                )
+                            ) : (
+                                !isFocusLayout && (
+                                    <div className={`p-3 rounded-lg w-full md:w-1/2 md:max-w-md mx-auto ${sectionBgClass} transition-colors duration-500 md:mt-auto`}>
+                                        {prizePoolHeaderJSX}
+                                        {buyInButtonsJSX}
+                                        {payoutsListJSX}
+                                    </div>
+                                )
+                            )}
                         </div>
+
+                        {isCenteredLayout && !isFocusLayout && (
+                            <div className="w-full flex justify-center mb-3">
+                                <div className={`p-3 rounded-lg w-full max-w-xl ${sectionBgClass} transition-colors duration-500`}>
+                                    {buyInButtonsJSX}
+                                </div>
+                            </div>
+                        )}
 
                         {/* Timer and Level Navigation Buttons */}
                         <div className="flex flex-wrap justify-center gap-2 w-full mt-4">
@@ -6323,8 +6420,10 @@ const getPerPlayerCountForChip = (chipId) => {
             useEffect(() => {
                 localStorage.setItem('cashLiveSyncEnabled', JSON.stringify(liveSyncEnabled));
             }, [liveSyncEnabled]);
-            const lastSyncPushAtRef = useRef(0);
+            const lastTimerPushAtRef = useRef(0);
+            const lastDataPushAtRef = useRef(0);
             const hasMountedSyncRef = useRef(false);
+            const hasMountedDataSyncRef = useRef(false);
 
             const [inputDuration, setInputDuration] = useState(60); // Changed default from 30 to 60
             const [pokerHands, setPokerHands] = useState([]);
@@ -7009,17 +7108,34 @@ useEffect(() => { localStorage.setItem('showSquidGame', JSON.stringify(showSquid
                 return () => clearInterval(timerRef.current);
             }, [isRunning, timeRemaining, alarmSoundEnabled, selectedAlarmSound]);
 
-            // Push clock state to Firestore on start/pause/reset (Pro only) --
-            // same approach as Tournament: only on discrete transitions, not
-            // every second, with the receiving device recalculating "remaining
-            // right now" from the write's timestamp.
+            // Push TIMER state only (Pro only) -- kept strictly separate from
+            // the data push below, and uses merge:true, so a change made on
+            // one device (e.g. setting a high hand) can never overwrite the
+            // running timer on other devices with this device's own
+            // (possibly stale/different) timeRemaining value. That was a real
+            // bug: bundling everything into one push meant setting a high
+            // hand -- or any bounty/toggle change -- silently reset the
+            // timer on every other synced screen.
             useEffect(() => {
                 if (!isPro || !authUser || !liveSyncEnabled) { setLiveSyncActive(false); return; }
                 if (!hasMountedSyncRef.current) { hasMountedSyncRef.current = true; return; }
+                const payload = { timeRemaining, isRunning, timerUpdatedAt: Date.now() };
+                lastTimerPushAtRef.current = payload.timerUpdatedAt;
+                window.__firebaseDb.collection('liveClockSync').doc(`${authUser.uid}_cash`)
+                    .set(payload, { merge: true })
+                    .then(() => setLiveSyncActive(true))
+                    .catch(e => console.error('Clock sync push failed:', e));
+                // eslint-disable-next-line react-hooks/exhaustive-deps
+            }, [isRunning, syncNonce, isPro, authUser, liveSyncEnabled]);
+
+            // Push high hand / bounty / toggle state separately -- never
+            // includes timeRemaining or isRunning, so it can't clobber the
+            // timer push above.
+            useEffect(() => {
+                if (!isPro || !authUser || !liveSyncEnabled) return;
+                if (!hasMountedDataSyncRef.current) { hasMountedDataSyncRef.current = true; return; }
                 const currentHand = Array.isArray(pokerHands) ? pokerHands.find(h => h.id === currentHighHandId) : undefined;
                 const payload = {
-                    timeRemaining,
-                    isRunning,
                     currentHighHandId,
                     currentHighHandData: currentHand || null,
                     badBeatJackpotAmount,
@@ -7030,55 +7146,59 @@ useEffect(() => { localStorage.setItem('showSquidGame', JSON.stringify(showSquid
                     show7DeuceGame,
                     showNitGame,
                     showSquidGame,
-                    updatedAt: Date.now(),
+                    dataUpdatedAt: Date.now(),
                 };
-                lastSyncPushAtRef.current = payload.updatedAt;
+                lastDataPushAtRef.current = payload.dataUpdatedAt;
                 window.__firebaseDb.collection('liveClockSync').doc(`${authUser.uid}_cash`)
-                    .set(payload)
-                    .then(() => setLiveSyncActive(true))
-                    .catch(e => console.error('Clock sync push failed:', e));
+                    .set(payload, { merge: true })
+                    .catch(e => console.error('Clock data sync push failed:', e));
                 // eslint-disable-next-line react-hooks/exhaustive-deps
-            }, [isRunning, syncNonce, isPro, authUser, liveSyncEnabled, currentHighHandId, pokerHands,
+            }, [isPro, authUser, liveSyncEnabled, currentHighHandId, pokerHands,
                 badBeatJackpotAmount, showBadBeatJackpot, sevenDeuceBounty, nitGameBounty, squidGameBounty,
                 show7DeuceGame, showNitGame, showSquidGame]);
 
-            // Listen for clock state pushed from another device.
+            // Listen for clock state pushed from another device. Timer fields
+            // and data fields are checked against their own separate
+            // timestamps, since they now arrive as independent writes.
             useEffect(() => {
                 if (!isPro || !authUser || !liveSyncEnabled) return;
                 const unsubscribe = window.__firebaseDb.collection('liveClockSync').doc(`${authUser.uid}_cash`)
                     .onSnapshot(snapshot => {
                         if (snapshot.metadata.hasPendingWrites) return;
                         const data = snapshot.data();
-                        if (!data || data.updatedAt === lastSyncPushAtRef.current) return;
+                        if (!data) return;
 
-                        const elapsedSec = data.isRunning ? Math.max(0, Math.floor((Date.now() - data.updatedAt) / 1000)) : 0;
-                        const adjustedTime = Math.max(0, (data.timeRemaining || 0) - elapsedSec);
-
-                        setTimeRemaining(adjustedTime);
-                        setIsRunning(!!data.isRunning);
-
-                        if ('currentHighHandId' in data) {
-                            setCurrentHighHandId(data.currentHighHandId);
-                            // Make sure the hand is actually present locally so it
-                            // displays correctly, even if the regular (slower)
-                            // settings sync hasn't caught up with this hand yet.
-                            if (data.currentHighHandData && data.currentHighHandId) {
-                                setPokerHands(prev => {
-                                    const exists = prev.some(h => h.id === data.currentHighHandId);
-                                    return exists ? prev : [...prev, data.currentHighHandData];
-                                });
-                            }
+                        if (typeof data.timerUpdatedAt === 'number' && data.timerUpdatedAt !== lastTimerPushAtRef.current) {
+                            const elapsedSec = data.isRunning ? Math.max(0, Math.floor((Date.now() - data.timerUpdatedAt) / 1000)) : 0;
+                            const adjustedTime = Math.max(0, (data.timeRemaining || 0) - elapsedSec);
+                            setTimeRemaining(adjustedTime);
+                            setIsRunning(!!data.isRunning);
+                            setLiveSyncActive(true);
                         }
-                        if (typeof data.badBeatJackpotAmount === 'number') setBadBeatJackpotAmount(data.badBeatJackpotAmount);
-                        if (typeof data.showBadBeatJackpot === 'boolean') setShowBadBeatJackpot(data.showBadBeatJackpot);
-                        if ('sevenDeuceBounty' in data) setSevenDeuceBounty(data.sevenDeuceBounty);
-                        if ('nitGameBounty' in data) setNitGameBounty(data.nitGameBounty);
-                        if ('squidGameBounty' in data) setSquidGameBounty(data.squidGameBounty);
-                        if (typeof data.show7DeuceGame === 'boolean') setShow7DeuceGame(data.show7DeuceGame);
-                        if (typeof data.showNitGame === 'boolean') setShowNitGame(data.showNitGame);
-                        if (typeof data.showSquidGame === 'boolean') setShowSquidGame(data.showSquidGame);
 
-                        setLiveSyncActive(true);
+                        if (typeof data.dataUpdatedAt === 'number' && data.dataUpdatedAt !== lastDataPushAtRef.current) {
+                            if ('currentHighHandId' in data) {
+                                setCurrentHighHandId(data.currentHighHandId);
+                                // Make sure the hand is actually present locally so it
+                                // displays correctly, even if the regular (slower)
+                                // settings sync hasn't caught up with this hand yet.
+                                if (data.currentHighHandData && data.currentHighHandId) {
+                                    setPokerHands(prev => {
+                                        const exists = prev.some(h => h.id === data.currentHighHandId);
+                                        return exists ? prev : [...prev, data.currentHighHandData];
+                                    });
+                                }
+                            }
+                            if (typeof data.badBeatJackpotAmount === 'number') setBadBeatJackpotAmount(data.badBeatJackpotAmount);
+                            if (typeof data.showBadBeatJackpot === 'boolean') setShowBadBeatJackpot(data.showBadBeatJackpot);
+                            if ('sevenDeuceBounty' in data) setSevenDeuceBounty(data.sevenDeuceBounty);
+                            if ('nitGameBounty' in data) setNitGameBounty(data.nitGameBounty);
+                            if ('squidGameBounty' in data) setSquidGameBounty(data.squidGameBounty);
+                            if (typeof data.show7DeuceGame === 'boolean') setShow7DeuceGame(data.show7DeuceGame);
+                            if (typeof data.showNitGame === 'boolean') setShowNitGame(data.showNitGame);
+                            if (typeof data.showSquidGame === 'boolean') setShowSquidGame(data.showSquidGame);
+                            setLiveSyncActive(true);
+                        }
                     }, e => console.error('Clock sync listener error:', e));
                 return () => unsubscribe();
             }, [isPro, authUser]);
