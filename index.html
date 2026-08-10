@@ -1643,23 +1643,16 @@
             // the next visit (fresh page load, browser hands the iframe a
             // fresh/isolated storage bucket instead of the previous one).
             //
-            // The fix: never treat the iframe's own localStorage as the
-            // source of truth. Instead:
-            //  1. Load the iframe empty first (not with the tracker yet).
-            //  2. Copy the tracker's known keys from the PARENT's reliable,
-            //     cloud-synced localStorage into the iframe's storage.
-            //  3. THEN inject the actual tracker app into that same,
-            //     now-pre-populated window via document.write -- since this
-            //     keeps the same window/storage context rather than causing a
-            //     new navigation, the tracker's synchronous
-            //     localStorage.getItem calls at startup see the
-            //     correct, restored data immediately.
-            //  4. Every write the tracker makes afterward is mirrored
-            //     directly into the parent's own localStorage too, not just
-            //     used as a trigger to push whatever's already there, so the
-            //     parent's storage -- and the cloud backup -- always has the
-            //     tracker's latest data regardless of whether the iframe's
-            //     own copy survives to the next reload.
+            // First attempt at fixing this used a blank iframe + document.write
+            // injection, but that broke the Logbook outright (likely onLoad
+            // never reliably fires for a src-less iframe, or document.write got
+            // blocked) -- reverted. This version is much safer: it keeps the
+            // ORIGINAL, proven-working srcDoc load mechanism completely intact,
+            // and just prepends a tiny <script> to the very start of the HTML
+            // (before srcDoc is ever set) that restores localStorage
+            // SYNCHRONOUSLY, so it runs before the tracker's own script -- and
+            // therefore before the tracker's synchronous
+            // localStorage.getItem() calls at startup -- ever executes.
             const TRACKER_STORAGE_KEYS = [
                 'poker_pro_roster',
                 'poker_pro_history',
@@ -1668,29 +1661,46 @@
                 'poker_pro_active_session',
             ];
 
+            const injectedTrackerHtml = useMemo(() => {
+                const restoreLines = TRACKER_STORAGE_KEYS.map(key => {
+                    const value = window.localStorage.getItem(key);
+                    if (value === null) return '';
+                    // Double-encoded on purpose: JSON.stringify here makes the
+                    // value safe to embed as a JS string literal inside the
+                    // generated <script> tag itself. The extra .replace guards
+                    // against a rare but real edge case: if any saved data
+                    // (a session title, player name, etc.) literally contains
+                    // the closing script-tag sequence, the HTML parser would see that
+                    // sequence and prematurely close this script tag -- it
+                    // looks for that literal byte sequence regardless of it
+                    // being "inside a JS string" from the script's own
+                    // perspective. Escaping the slash keeps it valid as a JS
+                    // string while making it invisible to the HTML parser.
+                    const safeKey = JSON.stringify(key).replace(/<\//g, '<\\/');
+                    const safeValue = JSON.stringify(value).replace(/<\//g, '<\\/');
+                    return `try { localStorage.setItem(${safeKey}, ${safeValue}); } catch (e) {}`;
+                }).filter(Boolean).join('\n');
+                const bootstrapScript = `<script>\n${restoreLines}\n<\/script>`;
+
+                // Insert right after <head> so it's the very first thing that
+                // runs, before Tailwind/fonts/the tracker's own script tag.
+                if (TRACKER_HTML.includes('<head>')) {
+                    return TRACKER_HTML.replace('<head>', `<head>${bootstrapScript}`);
+                }
+                // Fallback if the tracker's HTML structure ever changes and
+                // loses its <head> tag -- just prepend to the very top.
+                return bootstrapScript + TRACKER_HTML;
+            }, []); // Snapshot parent's localStorage once, at the moment the Logbook is opened
+
+            // Mirror every future write the tracker makes straight into the
+            // parent's own localStorage too (not just used as a trigger to
+            // push whatever's already there), so the parent's storage -- and
+            // the cloud backup -- always has the tracker's latest data
+            // regardless of whether the iframe's own copy survives to the
+            // next reload.
             const handleIframeLoad = (e) => {
                 try {
                     const iframeWindow = e.target.contentWindow;
-
-                    // Already-injected guard: document.write below triggers
-                    // this onLoad handler a second time (once for the initial
-                    // blank load, once for the injected content) -- only do
-                    // the restore+inject dance on the FIRST (blank) load.
-                    if (iframeWindow.__trackerInjected) {
-                        return;
-                    }
-
-                    // Step 2: restore from the parent's own reliable storage.
-                    TRACKER_STORAGE_KEYS.forEach(key => {
-                        const value = window.localStorage.getItem(key);
-                        if (value !== null) {
-                            iframeWindow.localStorage.setItem(key, value);
-                        }
-                    });
-
-                    // Step 4: mirror every future write straight into the
-                    // parent's own localStorage (using the parent's already
-                    // cloud-sync-patched setItem), not just as a trigger.
                     const original = iframeWindow.localStorage.setItem.bind(iframeWindow.localStorage);
                     iframeWindow.localStorage.setItem = function (key, value) {
                         original(key, value);
@@ -1698,20 +1708,15 @@
                             window.localStorage.setItem(key, value); // parent's patched setItem -- queues the real cloud push with the correct data
                         }
                     };
-
-                    // Step 3: inject the actual tracker app now that storage is primed.
-                    iframeWindow.__trackerInjected = true;
-                    iframeWindow.document.open();
-                    iframeWindow.document.write(TRACKER_HTML);
-                    iframeWindow.document.close();
                 } catch (err) {
-                    console.error('Could not set up Tracking app storage bridge:', err);
+                    console.error('Could not hook into Tracking app storage for cloud sync:', err);
                 }
             };
 
             return (
                 <div style={{ position: 'fixed', inset: 0, zIndex: 30 }}>
                     <iframe
+                        srcDoc={injectedTrackerHtml}
                         title="Poker Logbook"
                         onLoad={handleIframeLoad}
                         style={{ width: '100%', height: '100%', border: 'none', display: 'block' }}
