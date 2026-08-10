@@ -4633,6 +4633,23 @@ const getPerPlayerCountForChip = (chipId) => {
   return chipDistribution.perPlayer[chipId] ?? 0;
 };
             const nextLevelData = levels[currentLevelIndex + 1];
+
+            // Minutes until the next break, walking forward through the
+            // remaining levels from right now (partial credit for time
+            // already elapsed in the current level) until a break level is
+            // found. null if there's no break left in the structure at all --
+            // shown as "--" rather than a fabricated number.
+            const minutesToNextBreak = React.useMemo(() => {
+                if (!levels.length) return null;
+                let minutes = Math.ceil((timeRemaining || 0) / 60);
+                if (currentLevel && currentLevel.isBreak) return 0;
+                for (let i = currentLevelIndex + 1; i < levels.length; i++) {
+                    if (levels[i].isBreak) return minutes;
+                    minutes += levels[i].duration;
+                }
+                return null;
+            }, [levels, currentLevelIndex, timeRemaining, currentLevel]);
+
 				// NEW: build a blind structure with at most 20 levels,
 						// shaped by highestChip, targetHours, levelMinutes, and speed.
 						// Build blind structure based on user parameters
@@ -4816,18 +4833,21 @@ const getPerPlayerCountForChip = (chipId) => {
             // future changes to themes, fonts, logo, zoom, etc.
             const isFocusLayout = tournamentLayoutStyle === 'focus';
             const isCenteredLayout = tournamentLayoutStyle === 'centered';
+            const isCasinoLayout = tournamentLayoutStyle === 'casino';
             const clockSizeClass = isFocusLayout
                 ? 'text-8xl md:text-9xl'
                 : isCenteredLayout
                     ? 'text-7xl md:text-8xl lg:text-9xl'
-                    : 'text-6xl md:text-7xl lg:text-8xl';
+                    : isCasinoLayout
+                        ? 'text-7xl md:text-8xl'
+                        : 'text-6xl md:text-7xl lg:text-8xl';
             const blindsSizeClass = (isFocusLayout || isCenteredLayout)
                 ? 'text-5xl md:text-6xl'
                 : 'text-4xl md:text-5xl';
             const anteSizeClass = (isFocusLayout || isCenteredLayout)
                 ? 'text-4xl md:text-5xl'
                 : 'text-3xl md:text-4xl';
-            const showSecondaryInfo = !isFocusLayout; // Next Level card + Rebuy/End Time card
+            const showSecondaryInfo = !isFocusLayout && !isCasinoLayout; // Next Level card + Rebuy/End Time card -- Casino has its own dedicated stats grid instead
             const showPayoutsList = !isFocusLayout; // The detailed payout breakdown list is hidden on Focus -- the prize pool total and buy-in/rebuy/add-on buttons stay visible everywhere since they're functional controls, not just info
             const clockColumnLayoutClass = isCenteredLayout
                 ? 'flex flex-col items-center w-full'
@@ -5001,10 +5021,50 @@ const getPerPlayerCountForChip = (chipId) => {
                                     </div>
                                 )}
 
-                                {!isCenteredLayout && nextLevelAndRebuyJSX}
+                                {!isCenteredLayout && !isCasinoLayout && nextLevelAndRebuyJSX}
                             </div>
 
-                            {isCenteredLayout ? (
+                            {isCasinoLayout && !isFocusLayout && (
+                                <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-3xl mx-auto`}>
+                                    <div className={`${sectionBgClass} rounded-lg p-3 transition-colors duration-500`}>
+                                        <p className={`text-xs uppercase tracking-wide font-semibold ${subtextColorClass} mb-1`}>Entrants</p>
+                                        <p className={`text-3xl font-bold ${headingTextColorClass}`}>{numPlayers}</p>
+                                    </div>
+                                    <div className={`${sectionBgClass} rounded-lg p-3 transition-colors duration-500`}>
+                                        <p className={`text-xs uppercase tracking-wide font-semibold ${subtextColorClass} mb-1`}>Prize Pool</p>
+                                        <p className={`text-3xl font-bold ${headingTextColorClass}`}>${totalPrizePool.toLocaleString()}</p>
+                                    </div>
+                                    {nextLevelData && !nextLevelData.isBreak && (
+                                        <>
+                                            <div className={`${sectionBgClass} rounded-lg p-3 transition-colors duration-500`}>
+                                                <p className={`text-xs uppercase tracking-wide font-semibold ${subtextColorClass} mb-1`}>Next Ante</p>
+                                                <p className={`text-3xl font-bold ${headingTextColorClass}`}>{nextLevelData.ante > 0 ? nextLevelData.ante.toLocaleString() : '--'}</p>
+                                            </div>
+                                            <div className={`${sectionBgClass} rounded-lg p-3 transition-colors duration-500`}>
+                                                <p className={`text-xs uppercase tracking-wide font-semibold ${subtextColorClass} mb-1`}>Next Blinds</p>
+                                                <p className={`text-3xl font-bold ${headingTextColorClass}`}>{formatBlind(nextLevelData.sb)} - {formatBlind(nextLevelData.bb)}</p>
+                                            </div>
+                                        </>
+                                    )}
+                                    <div className={`${sectionBgClass} rounded-lg p-3 transition-colors duration-500`}>
+                                        <p className={`text-xs uppercase tracking-wide font-semibold ${subtextColorClass} mb-1`}>Next Break</p>
+                                        <p className={`text-3xl font-bold ${headingTextColorClass}`}>{minutesToNextBreak !== null ? `${minutesToNextBreak} min` : '--'}</p>
+                                    </div>
+                                    <div className={`${sectionBgClass} rounded-lg p-3 transition-colors duration-500`}>
+                                        <p className={`text-xs uppercase tracking-wide font-semibold ${subtextColorClass} mb-1`}>Rebuys / Add-Ons</p>
+                                        <p className={`text-3xl font-bold ${headingTextColorClass}`}>{rebuyCount} / {addOnCount}</p>
+                                    </div>
+                                </div>
+                            )}
+
+                            {isCasinoLayout ? (
+                                !isFocusLayout && (
+                                    <div className={`p-3 rounded-lg w-full max-w-3xl mx-auto ${sectionBgClass} transition-colors duration-500`}>
+                                        {buyInButtonsJSX}
+                                        {payoutsListJSX}
+                                    </div>
+                                )
+                            ) : isCenteredLayout ? (
                                 !isFocusLayout && (
                                     <div className="flex flex-col md:flex-row w-full gap-4">
                                         <div className="md:w-1/2 flex flex-col items-center">
@@ -6137,11 +6197,12 @@ const getPerPlayerCountForChip = (chipId) => {
                                             {/* --- Layout style --- */}
                                             <div>
                                                 <label className={`text-sm font-semibold ${subtextColorClass} block mb-2`}>Layout Style</label>
-                                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                                                     {[
                                                         { key: 'classic', name: 'Classic', desc: 'Everything visible, side by side' },
                                                         { key: 'centered', name: 'Centered', desc: 'Bigger clock, single centered column' },
                                                         { key: 'focus', name: 'Focus', desc: 'Just the clock and blinds, nothing else' },
+                                                        { key: 'casino', name: 'Casino', desc: 'Stats grid: entrants, prize pool, next ante/blinds, next break' },
                                                     ].map(opt => (
                                                         <button
                                                             key={opt.key}
