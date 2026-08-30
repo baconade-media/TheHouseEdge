@@ -3694,18 +3694,32 @@ stack = Math.round(stack / roundingUnit) * roundingUnit;
                                 if (alarmSoundEnabled) {
                                     playAlarmSound(selectedAlarmSound, audioRef.current);
                                 }
-                                // If current level is a break, pause the timer instead of auto-advancing
-                                if (currentLevel && currentLevel.isBreak) {
-                                    setIsRunning(false); // Pause the timer
-                                    return 0; // Keep time at 0 until manually advanced
-                                } else if (currentLevelIndex < levels.length - 1) {
-                                    // If not a break, auto-advance to next level
-                                    setCurrentLevelIndex(currentLevelIndex + 1); // This will trigger Effect 1 to set new time
-                                    return 0; // Set to 0 temporarily, will be overwritten by Effect 1
-                                } else {
-                                    setIsRunning(false); // End of tournament
-                                    return 0;
-                                }
+                                // Advance the level using the FUNCTIONAL setState form,
+                                // rather than reading currentLevelIndex/currentLevel from
+                                // this effect's own closure. This used to be a real bug:
+                                // setCurrentLevelIndex(currentLevelIndex + 1) captured
+                                // currentLevelIndex from whenever this interval was
+                                // created, not necessarily the live value -- if the
+                                // interval was ever created/recreated with a
+                                // now-outdated index still in memory, this would advance
+                                // to the wrong level (or silently fail to advance at
+                                // all, landing back on the same index). Looking up the
+                                // level to check isBreak/bounds using the updater's own
+                                // prevIndex, instead of the outer closure's variables,
+                                // removes the staleness risk entirely.
+                                setCurrentLevelIndex(prevIndex => {
+                                    const levelJustFinished = levels[prevIndex];
+                                    if (levelJustFinished && levelJustFinished.isBreak) {
+                                        setIsRunning(false); // Pause the timer
+                                        return prevIndex; // Stay put until manually advanced
+                                    } else if (prevIndex < levels.length - 1) {
+                                        return prevIndex + 1; // Auto-advance; Effect 1 will set the new level's time
+                                    } else {
+                                        setIsRunning(false); // End of tournament
+                                        return prevIndex;
+                                    }
+                                });
+                                return 0; // Set to 0 temporarily, will be overwritten by Effect 1 if a new level started
                             }
                             return prev - 1;
                         });
@@ -3715,7 +3729,7 @@ stack = Math.round(stack / roundingUnit) * roundingUnit;
                     clearInterval(timerIntervalRef.current);
                 }
                 return () => clearInterval(timerIntervalRef.current); // Cleanup on unmount/re-render
-            }, [isRunning, timeRemaining, currentLevelIndex, levels, currentLevel]); // Depend on these to react to changes
+            }, [isRunning, timeRemaining, levels, alarmSoundEnabled, selectedAlarmSound]); // currentLevelIndex/currentLevel deliberately removed -- level lookups now happen inside the functional updater instead, using the live prevIndex
 
             // Effect 2b: Push clock state to Firestore on start/pause/level-change/
             // reset (Pro only) so another device viewing the same tournament can
