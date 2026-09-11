@@ -5513,13 +5513,11 @@ const getPerPlayerCountForChip = (chipId) => {
                                                     {level.isBreak ? (
                                                         <div className="flex items-center gap-2 flex-grow justify-start md:justify-center">
                                                             <label className={`${subtextColorClass} text-sm whitespace-nowrap`}>Duration (min):</label>
-                                                            <NumberSpinner
+                                                            <DraftNumberInput
                                                                 value={level.duration}
-                                                                min={1} max={60} step={1}
                                                                 onChange={(val) => updateLevel(level.id, 'duration', val)}
-                                                                theme={theme}
-                                                                widthClass="w-20"
-                                                                textSizeClass="text-base"
+                                                                min={1}
+                                                                className={`w-20 px-2 py-1.5 rounded-md text-center text-base font-semibold ${inputBgClass} ${inputBorderClass} border ${subtextColorClass}`}
                                                             />
                                                         </div>
                                                     ) : (
@@ -5553,14 +5551,12 @@ const getPerPlayerCountForChip = (chipId) => {
                                                             </div>
                                                             <div className="flex items-center gap-2">
                                                                 <label className={`${subtextColorClass} text-sm whitespace-nowrap`}>Duration (min):</label>
-                                                                <NumberSpinner
+                                                                <DraftNumberInput
                                                                     value={level.duration}
-                                                                    min={1} max={60} step={1}
                                                                     onChange={(val) => updateLevel(level.id, 'duration', val)}
-                                                                    theme={theme}
-                                                                    widthClass="w-20"
-                                                                    textSizeClass="text-base"
-                                                            />
+                                                                    min={1}
+                                                                    className={`w-20 px-2 py-1.5 rounded-md text-center text-base font-semibold ${inputBgClass} ${inputBorderClass} border ${subtextColorClass}`}
+                                                                />
                                                             </div>
                                                         </div>
                                                     )}
