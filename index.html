@@ -1895,7 +1895,7 @@
             };
 
             const addContact = () => {
-                if (!newContactName.trim() || (!newContactPhone.trim() && !newContactEmail.trim())) return;
+                if (!newContactName.trim()) return;
                 const contact = {
                     id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
                     name: newContactName.trim(),
@@ -2105,7 +2105,7 @@
             };
 
             const saveEditingContact = () => {
-                if (!editContactName.trim() || (!editContactPhone.trim() && !editContactEmail.trim())) return;
+                if (!editContactName.trim()) return;
                 setContacts(prev => prev.map(c => c.id === editingContactId
                     ? { ...c, name: editContactName.trim(), phone: editContactPhone.trim(), email: editContactEmail.trim() }
                     : c));
