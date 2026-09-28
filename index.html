@@ -3061,6 +3061,384 @@
             );
         };
 
+
+        // --- Side Pot Calculator (Cash + Tournament utility) ---
+        // A speed-oriented scratchpad for working out complicated multi-way
+        // all-in situations. Stays mounted (returns null when closed) so a
+        // dealer's in-progress entry survives an accidental close/reopen
+        // mid-hand -- it's not tied to Logbook/session data at all.
+        const SidePotCalculatorModal = ({ open, onClose }) => {
+            const makeRow = (n) => ({ id: `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, name: `Player ${n}`, committed: null, status: 'allin' });
+            const [rows, setRows] = useState(() => [makeRow(1), makeRow(2)]);
+            const [pots, setPots] = useState(null);
+            const [resolutions, setResolutions] = useState({});
+            const [activeMode, setActiveMode] = useState({});
+            const [chopSelections, setChopSelections] = useState({});
+            const [pctDrafts, setPctDrafts] = useState({});
+            const [rosterPickerForId, setRosterPickerForId] = useState(null);
+
+            const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
+
+            const roster = useMemo(() => {
+                if (!open) return [];
+                try { return JSON.parse(localStorage.getItem('poker_pro_roster') || '[]'); } catch (e) { return []; }
+            }, [open]);
+
+            const totalsByPlayer = useMemo(() => {
+                const totals = {};
+                Object.values(resolutions).forEach(res => {
+                    res.winners.forEach(w => {
+                        totals[w.name] = round2((totals[w.name] || 0) + w.amount);
+                    });
+                });
+                return totals;
+            }, [resolutions]);
+
+            if (!open) return null;
+
+            const addRow = () => setRows(prev => [...prev, makeRow(prev.length + 1)]);
+            const removeRow = (id) => setRows(prev => prev.length > 2 ? prev.filter(r => r.id !== id) : prev);
+            const updateRow = (id, patch) => setRows(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
+
+            const resetAll = () => {
+                setRows([makeRow(1), makeRow(2)]);
+                setPots(null);
+                setResolutions({});
+                setActiveMode({});
+                setChopSelections({});
+                setPctDrafts({});
+                setRosterPickerForId(null);
+            };
+
+            const enteredTotal = round2(rows.reduce((s, r) => s + (parseFloat(r.committed) || 0), 0));
+            const canCalculate = rows.filter(r => (parseFloat(r.committed) || 0) > 0).length >= 2;
+
+            const calculatePots = () => {
+                const parsed = rows
+                    .map(r => ({ name: (r.name || '').trim() || 'Player', committed: parseFloat(r.committed) || 0, status: r.status }))
+                    .filter(p => p.committed > 0);
+                const levels = [...new Set(parsed.map(p => p.committed))].sort((a, b) => a - b);
+                let prevLevel = 0;
+                const result = [];
+                for (const level of levels) {
+                    const layer = level - prevLevel;
+                    const contributors = parsed.filter(p => p.committed >= level);
+                    const amount = round2(layer * contributors.length);
+                    const eligible = contributors.filter(p => p.status !== 'folded').map(p => p.name);
+                    if (amount > 0) result.push({ amount, eligible });
+                    prevLevel = level;
+                }
+                setPots(result);
+                setActiveMode({});
+                setChopSelections({});
+                setPctDrafts({});
+                const autoRes = {};
+                result.forEach((pot, i) => {
+                    if (pot.eligible.length === 1) {
+                        autoRes[i] = { mode: 'auto', winners: [{ name: pot.eligible[0], amount: pot.amount }] };
+                    }
+                });
+                setResolutions(autoRes);
+            };
+
+            const resolveSingle = (potIndex, name) => {
+                const pot = pots[potIndex];
+                setResolutions(prev => ({ ...prev, [potIndex]: { mode: 'single', winners: [{ name, amount: pot.amount }] } }));
+            };
+
+            const toggleChopWinner = (potIndex, name) => {
+                const pot = pots[potIndex];
+                setChopSelections(prev => {
+                    const current = prev[potIndex] || [];
+                    const exists = current.includes(name);
+                    const next = exists ? current.filter(n => n !== name) : [...current, name];
+                    if (next.length >= 2) {
+                        const base = Math.floor((pot.amount / next.length) * 100) / 100;
+                        const winners = next.map(n => ({ name: n, amount: base }));
+                        const distributed = round2(base * next.length);
+                        const remainder = round2(pot.amount - distributed);
+                        if (remainder > 0) winners[0].amount = round2(winners[0].amount + remainder);
+                        setResolutions(prevRes => ({ ...prevRes, [potIndex]: { mode: 'chop', winners } }));
+                    } else {
+                        setResolutions(prevRes => { const c = { ...prevRes }; delete c[potIndex]; return c; });
+                    }
+                    return { ...prev, [potIndex]: next };
+                });
+            };
+
+            const setPctDraft = (potIndex, name, value) => {
+                setPctDrafts(prev => ({ ...prev, [potIndex]: { ...(prev[potIndex] || {}), [name]: value } }));
+            };
+
+            const pctSum = (potIndex, eligible) => {
+                const drafts = pctDrafts[potIndex] || {};
+                return eligible.reduce((s, name) => s + (parseFloat(drafts[name]) || 0), 0);
+            };
+
+            const confirmPctSplit = (potIndex) => {
+                const pot = pots[potIndex];
+                const drafts = pctDrafts[potIndex] || {};
+                const sum = pctSum(potIndex, pot.eligible);
+                if (Math.abs(sum - 100) > 0.01) return;
+                const winners = pot.eligible
+                    .map(name => ({ name, pct: parseFloat(drafts[name]) || 0 }))
+                    .filter(w => w.pct > 0)
+                    .map(w => ({ name: w.name, amount: round2(pot.amount * w.pct / 100) }));
+                const distributed = round2(winners.reduce((s, w) => s + w.amount, 0));
+                const remainder = round2(pot.amount - distributed);
+                if (remainder !== 0 && winners.length > 0) winners[0].amount = round2(winners[0].amount + remainder);
+                setResolutions(prev => ({ ...prev, [potIndex]: { mode: 'percent', winners } }));
+            };
+
+            const reopenPot = (potIndex) => {
+                setResolutions(prev => { const c = { ...prev }; delete c[potIndex]; return c; });
+                setChopSelections(prev => ({ ...prev, [potIndex]: [] }));
+                setActiveMode(prev => ({ ...prev, [potIndex]: null }));
+            };
+
+            const potLabel = (i) => i === 0 ? 'Main Pot' : `Side Pot ${i}`;
+            const selectedBtn = 'bg-blue-600 text-white';
+            const unselectedBtn = 'bg-slate-900 text-slate-300 hover:bg-slate-700';
+
+            return (
+                <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+                    <div
+                        className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl p-5 bg-slate-800 text-white"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="flex items-center justify-between mb-1">
+                            <h3 className="text-lg font-bold flex items-center gap-2">🧮 Side Pot Calculator</h3>
+                            <button onClick={onClose} className="text-slate-400 hover:text-white text-xl leading-none px-1">✕</button>
+                        </div>
+                        <p className="text-xs text-slate-400 mb-4">
+                            Enter what each player has committed to the pot, mark their status, then calculate. This doesn't save to your Logbook -- it's just a quick scratchpad for working out the hand.
+                        </p>
+
+                        {/* Player rows */}
+                        <div className="space-y-2 mb-3">
+                            {rows.map((r, idx) => (
+                                <div key={r.id} className="bg-slate-900/60 rounded-lg p-2.5">
+                                    <div className="flex items-center gap-1.5 mb-2">
+                                        <div className="relative flex-grow">
+                                            <input
+                                                type="text"
+                                                value={r.name}
+                                                onChange={(e) => updateRow(r.id, { name: e.target.value })}
+                                                placeholder={`Player ${idx + 1}`}
+                                                className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 w-full text-sm text-slate-100"
+                                            />
+                                            {rosterPickerForId === r.id && (
+                                                <div className="absolute z-10 top-full left-0 mt-1 w-full max-h-40 overflow-y-auto bg-slate-950 border border-slate-700 rounded-lg shadow-xl p-2 flex flex-wrap gap-1.5">
+                                                    {roster.length === 0 ? (
+                                                        <p className="text-xs text-slate-500 italic p-1">No saved roster names yet</p>
+                                                    ) : roster.map(name => (
+                                                        <button
+                                                            key={name}
+                                                            onClick={() => { updateRow(r.id, { name }); setRosterPickerForId(null); }}
+                                                            className="px-2.5 py-1 rounded-full text-xs font-medium bg-slate-800 text-slate-100 hover:bg-slate-700"
+                                                        >
+                                                            {name}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                        <button
+                                            onClick={() => setRosterPickerForId(prev => prev === r.id ? null : r.id)}
+                                            title="Pick from roster"
+                                            className={`w-9 h-9 flex-shrink-0 rounded-lg flex items-center justify-center text-sm ${rosterPickerForId === r.id ? selectedBtn : unselectedBtn}`}
+                                        >
+                                            👤
+                                        </button>
+                                        <DraftNumberInput
+                                            value={r.committed}
+                                            onChange={(v) => updateRow(r.id, { committed: v })}
+                                            min={0}
+                                            allowDecimal={true}
+                                            placeholder="$ Amount"
+                                            className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 w-28 flex-shrink-0 text-sm text-slate-100"
+                                        />
+                                        <button
+                                            onClick={() => removeRow(r.id)}
+                                            disabled={rows.length <= 2}
+                                            title="Remove player"
+                                            className="w-9 h-9 flex-shrink-0 rounded-lg flex items-center justify-center text-sm bg-slate-900 text-slate-500 hover:text-red-400 disabled:opacity-30 disabled:hover:text-slate-500"
+                                        >
+                                            🗑
+                                        </button>
+                                    </div>
+                                    <div className="flex gap-1.5">
+                                        {[['allin', 'All-In'], ['active', 'Active'], ['folded', 'Folded']].map(([val, label]) => (
+                                            <button
+                                                key={val}
+                                                onClick={() => updateRow(r.id, { status: val })}
+                                                className={`flex-1 py-1 rounded-md text-xs font-semibold ${r.status === val ? (val === 'folded' ? 'bg-red-600 text-white' : val === 'active' ? 'bg-emerald-600 text-white' : 'bg-blue-600 text-white') : unselectedBtn}`}
+                                            >
+                                                {label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+
+                        <div className="flex items-center justify-between mb-4">
+                            <button onClick={addRow} className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-700 hover:bg-slate-600 text-white">
+                                + Add Player
+                            </button>
+                            <p className="text-xs text-slate-400">Total entered: <span className="font-semibold text-slate-200">${enteredTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></p>
+                        </div>
+
+                        <button
+                            onClick={calculatePots}
+                            disabled={!canCalculate}
+                            className="w-full py-2.5 rounded-lg font-semibold bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-30 disabled:hover:bg-blue-600 mb-2"
+                        >
+                            Calculate Pots
+                        </button>
+                        {!canCalculate && (
+                            <p className="text-xs text-slate-500 text-center mb-2">Enter an amount for at least 2 players to calculate.</p>
+                        )}
+
+                        {/* Pot results */}
+                        {pots && pots.length > 0 && (
+                            <div className="mt-4 space-y-2.5 border-t border-slate-700 pt-4">
+                                {pots.map((pot, i) => {
+                                    const res = resolutions[i];
+                                    if (res) {
+                                        return (
+                                            <div key={i} className="bg-slate-900/60 rounded-lg p-3">
+                                                <div className="flex items-center justify-between mb-1">
+                                                    <p className="text-sm font-bold">{potLabel(i)} -- ${pot.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                                                    {res.mode !== 'auto' && (
+                                                        <button onClick={() => reopenPot(i)} className="text-xs text-slate-400 hover:text-white underline">Edit</button>
+                                                    )}
+                                                </div>
+                                                <p className="text-xs text-slate-300">
+                                                    {res.mode === 'auto' && 'Only one eligible player -- '}
+                                                    {res.winners.map((w, wi) => (
+                                                        <span key={wi}>{wi > 0 ? ', ' : ''}<span className="font-semibold text-emerald-400">{w.name}</span> +${w.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                                    ))}
+                                                </p>
+                                            </div>
+                                        );
+                                    }
+                                    const mode = activeMode[i];
+                                    return (
+                                        <div key={i} className="bg-slate-900/60 rounded-lg p-3">
+                                            <p className="text-sm font-bold mb-1">{potLabel(i)} -- ${pot.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                                            <p className="text-xs text-slate-400 mb-2">Eligible: {pot.eligible.join(', ')}</p>
+                                            <div className="flex gap-1.5 mb-2">
+                                                {['single', 'chop', 'percent'].map(m => (
+                                                    <button
+                                                        key={m}
+                                                        onClick={() => setActiveMode(prev => ({ ...prev, [i]: m }))}
+                                                        className={`flex-1 py-1 rounded-md text-xs font-semibold ${mode === m ? selectedBtn : unselectedBtn}`}
+                                                    >
+                                                        {m === 'single' ? 'Single Winner' : m === 'chop' ? 'Chop Evenly' : '% Split'}
+                                                    </button>
+                                                ))}
+                                            </div>
+
+                                            {mode === 'single' && (
+                                                <div className="flex flex-wrap gap-1.5">
+                                                    {pot.eligible.map(name => (
+                                                        <button
+                                                            key={name}
+                                                            onClick={() => resolveSingle(i, name)}
+                                                            className="px-2.5 py-1 rounded-full text-xs font-medium bg-slate-800 hover:bg-blue-600 text-slate-100"
+                                                        >
+                                                            {name}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
+
+                                            {mode === 'chop' && (
+                                                <div>
+                                                    <div className="flex flex-wrap gap-1.5 mb-1">
+                                                        {pot.eligible.map(name => {
+                                                            const sel = (chopSelections[i] || []).includes(name);
+                                                            return (
+                                                                <button
+                                                                    key={name}
+                                                                    onClick={() => toggleChopWinner(i, name)}
+                                                                    className={`px-2.5 py-1 rounded-full text-xs font-medium ${sel ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-100 hover:bg-slate-700'}`}
+                                                                >
+                                                                    {name}
+                                                                </button>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                    <p className="text-xs text-slate-500">Tap 2 or more to split evenly (odd cent goes to the first tapped).</p>
+                                                </div>
+                                            )}
+
+                                            {mode === 'percent' && (
+                                                <div>
+                                                    <div className="space-y-1.5 mb-2">
+                                                        {pot.eligible.map(name => (
+                                                            <div key={name} className="flex items-center gap-2">
+                                                                <span className="text-xs text-slate-300 flex-grow">{name}</span>
+                                                                <DraftNumberInput
+                                                                    value={(pctDrafts[i] || {})[name] ?? null}
+                                                                    onChange={(v) => setPctDraft(i, name, v)}
+                                                                    min={0}
+                                                                    max={100}
+                                                                    allowDecimal={true}
+                                                                    placeholder="0"
+                                                                    className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 w-16 text-xs text-slate-100 text-right"
+                                                                />
+                                                                <span className="text-xs text-slate-500">%</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                    <div className="flex items-center justify-between">
+                                                        <p className={`text-xs ${Math.abs(pctSum(i, pot.eligible) - 100) < 0.01 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                                                            Total: {pctSum(i, pot.eligible).toFixed(1)}%
+                                                        </p>
+                                                        <button
+                                                            onClick={() => confirmPctSplit(i)}
+                                                            disabled={Math.abs(pctSum(i, pot.eligible) - 100) > 0.01}
+                                                            className="px-3 py-1 rounded-md text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-30"
+                                                        >
+                                                            Confirm Split
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+
+                                {/* Final summary */}
+                                <div className="bg-slate-950 rounded-lg p-3 mt-3 border border-slate-700">
+                                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1.5">
+                                        {pots.every((_, i) => resolutions[i]) ? 'Final Payouts' : `Payouts so far (${Object.keys(resolutions).length} of ${pots.length} pots resolved)`}
+                                    </p>
+                                    {Object.keys(totalsByPlayer).length === 0 ? (
+                                        <p className="text-xs text-slate-500 italic">Assign a winner to each pot above to see payouts.</p>
+                                    ) : (
+                                        <div className="space-y-0.5">
+                                            {Object.entries(totalsByPlayer).sort((a, b) => b[1] - a[1]).map(([name, amount]) => (
+                                                <p key={name} className="text-sm">
+                                                    <span className="font-semibold">{name}</span>: <span className="text-emerald-400 font-semibold">+${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                                </p>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        <button onClick={resetAll} className="w-full mt-4 py-2 rounded-lg text-xs font-semibold border border-slate-600 text-slate-300 hover:bg-slate-700">
+                            Reset for New Hand
+                        </button>
+                    </div>
+                </div>
+            );
+        };
+
         const HomeView = ({ onSelectMode, theme, headingTextColorClass, mainCardBgClass, isPro }) => {
             console.log("HomeView component rendering");
             // URL for the image to display above the selection box
@@ -3165,6 +3543,7 @@
         // TournamentClockView: All states, effects, and functions specific to the Tournament Clock
         const TournamentClockView = ({ theme, appBgClass, mainCardBgClass, sectionBgClass, inputBgClass, inputBorderClass, subtextColorClass, placeholderColorClass, headingTextColorClass, onBackToHome, onThemeChange, uiScale, onZoomChange, isPro, authUser }) => {
             const [showSettings, setShowSettings] = useState(false);
+            const [showSidePotCalc, setShowSidePotCalc] = useState(false);
             const [lockedFeatureName, setLockedFeatureName] = useState(null);
             const [tournamentSettingsSubView, setTournamentSettingsSubView] = useState('menu');			// 'menu', 'blinds', 'payouts', 'visual', 'chipSettings'
 			const [tempPlayersRange, setTempPlayersRange] = useState(null);
@@ -5159,6 +5538,9 @@ const getPerPlayerCountForChip = (chipId) => {
                                 <button onClick={() => onZoomChange(1)} className={`px-1 text-xs font-semibold w-10 text-center ${subtextColorClass}`} title="Reset size">{Math.round(uiScale * 100)}%</button>
                                 <button onClick={() => onZoomChange(Math.min(2, Math.round((uiScale + 0.1) * 100) / 100))} className={`w-8 h-8 rounded-full flex items-center justify-center text-lg font-bold ${subtextColorClass} hover:bg-black/10`}>+</button>
                             </div>
+                            <button onClick={() => setShowSidePotCalc(true)} title="Side Pot Calculator" className={`${sectionBgClass} p-3 rounded-full shadow-md transition-all duration-200 hover:scale-105 text-xl leading-none`}>
+                                🧮
+                            </button>
                             <button onClick={() => setShowSettings(true)} className={`${sectionBgClass} p-3 rounded-full shadow-md transition-all duration-200 hover:scale-105`}>
                                 <svg xmlns="http://www.w3.org/2000/svg" className={`h-6 w-6 ${subtextColorClass}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.39a2 2 0 00.73 2.73l.08.15a2 2 0 010 2l-.15.25a2 2 0 00-.73 2.73l.22.39a2 2 0 012.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 001 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l-.22-.39a2 2 0 00-.73-2.73l-.08-.15a2 2 0 010-2l.15-.25a2 2 0 00.73-2.73l-.22-.39a2 2 0 01-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25A2 2 0 0013 4.18V2a2 2 0 00-2-2z" />
@@ -6466,6 +6848,7 @@ const getPerPlayerCountForChip = (chipId) => {
                     {lockedFeatureName && (
                         <ProFeatureModal featureName={lockedFeatureName} onClose={() => setLockedFeatureName(null)} />
                     )}
+                    <SidePotCalculatorModal open={showSidePotCalc} onClose={() => setShowSidePotCalc(false)} />
                 </div>
             );
         };
@@ -6490,6 +6873,7 @@ const getPerPlayerCountForChip = (chipId) => {
         const HighHandTimerView = ({ theme, appBgClass, mainCardBgClass, sectionBgClass, inputBgClass, inputBorderClass, subtextColorClass, placeholderColorClass, headingTextColorClass, onBackToHome, onThemeChange, uiScale, onZoomChange, isPro, authUser }) => {
             // All states and effects from the original App component related to High Hand Timer
             const [showSettings, setShowSettings] = useState(false);
+            const [showSidePotCalc, setShowSidePotCalc] = useState(false);
             const [highHandSettingsSubView, setHighHandSettingsSubView] = useState('main'); // 'main', 'visual', 'jackpot', 'additionalGames', 'chipSettings'
             const [showAddManageHands, setShowAddManageHands] = useState(false);
             const [isFullscreen, setIsFullscreen] = useState(false);
@@ -7666,6 +8050,9 @@ const [lockedFeatureName, setLockedFeatureName] = useState(null);
                                 <button onClick={() => onZoomChange(1)} className={`px-1 text-xs font-semibold w-10 text-center ${subtextColorClass}`} title="Reset size">{Math.round(uiScale * 100)}%</button>
                                 <button onClick={() => onZoomChange(Math.min(2, Math.round((uiScale + 0.1) * 100) / 100))} className={`w-8 h-8 rounded-full flex items-center justify-center text-lg font-bold ${subtextColorClass} hover:bg-black/10`}>+</button>
                             </div>
+                            <button onClick={() => setShowSidePotCalc(true)} title="Side Pot Calculator" className={`${sectionBgClass} p-3 rounded-full shadow-md transition-all duration-200 hover:scale-105 text-xl leading-none`}>
+                                🧮
+                            </button>
                             <button onClick={() => { setShowSettings(true); setHighHandSettingsSubView('main'); }} className={`${sectionBgClass} p-3 rounded-full shadow-md transition-all duration-200 hover:scale-105`}>
                                 <svg xmlns="http://www.w3.org/2000/svg" className={`h-6 w-6 ${subtextColorClass}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.39a2 2 0 00.73 2.73l.08.15a2 2 0 010 2l-.15.25a2 2 0 00-.73 2.73l.22.39a2 2 0 012.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 001 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l-.22-.39a2 2 0 00-.73-2.73l-.08-.15a2 2 0 010-2l.15-.25a2 2 0 00.73-2.73l-.22-.39a2 2 0 01-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25A2 2 0 0013 4.18V2a2 2 0 00-2-2z" />
@@ -8845,6 +9232,7 @@ const [lockedFeatureName, setLockedFeatureName] = useState(null);
                     {lockedFeatureName && (
                         <ProFeatureModal featureName={lockedFeatureName} onClose={() => setLockedFeatureName(null)} />
                     )}
+                    <SidePotCalculatorModal open={showSidePotCalc} onClose={() => setShowSidePotCalc(false)} />
                 </div>
             );
         };
