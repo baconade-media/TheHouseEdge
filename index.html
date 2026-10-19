@@ -3067,8 +3067,24 @@
         // all-in situations. Stays mounted (returns null when closed) so a
         // dealer's in-progress entry survives an accidental close/reopen
         // mid-hand -- it's not tied to Logbook/session data at all.
+        // --- Side Pot Calculator (Cash + Tournament utility) ---
+        // A speed-oriented scratchpad for working out complicated multi-way
+        // all-in situations. Stays mounted (returns null when closed) so a
+        // dealer's in-progress entry survives an accidental close/reopen
+        // mid-hand -- it's not tied to Logbook/session data at all.
+        //
+        // Presented as a 4-stage wizard (Players -> Pots -> Winners -> Payout)
+        // rather than one long scrolling form, so it reads as walking through
+        // the hand instead of filling out a spreadsheet. Earlier stages stay
+        // reachable by tapping their pill once pots have been calculated;
+        // re-calculating (from Players) clears any winner picks made so far
+        // since the pot amounts may have changed.
         const SidePotCalculatorModal = ({ open, onClose }) => {
+            const STEP_ORDER = ['players', 'pots', 'winners', 'payout'];
+            const STEP_LABELS = { players: 'Players', pots: 'Pots', winners: 'Winners', payout: 'Payout' };
+
             const makeRow = (n) => ({ id: `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, name: `Player ${n}`, committed: null, status: 'allin' });
+            const [step, setStep] = useState('players');
             const [rows, setRows] = useState(() => [makeRow(1), makeRow(2)]);
             const [pots, setPots] = useState(null);
             const [resolutions, setResolutions] = useState({});
@@ -3108,6 +3124,7 @@
                 setChopSelections({});
                 setPctDrafts({});
                 setRosterPickerForId(null);
+                setStep('players');
             };
 
             const enteredTotal = round2(rows.reduce((s, r) => s + (parseFloat(r.committed) || 0), 0));
@@ -3139,6 +3156,7 @@
                     }
                 });
                 setResolutions(autoRes);
+                setStep('pots');
             };
 
             const resolveSingle = (potIndex, name) => {
@@ -3197,8 +3215,15 @@
             };
 
             const potLabel = (i) => i === 0 ? 'Main Pot' : `Side Pot ${i}`;
+            const fmtMoney = (n) => `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
             const selectedBtn = 'bg-blue-600 text-white';
             const unselectedBtn = 'bg-slate-900 text-slate-300 hover:bg-slate-700';
+
+            const hasPots = pots && pots.length > 0;
+            const furthestStepIndex = hasPots ? STEP_ORDER.length - 1 : 0;
+            const canJumpTo = (key) => STEP_ORDER.indexOf(key) <= furthestStepIndex;
+            const goToStep = (key) => { if (canJumpTo(key)) setStep(key); };
+            const allResolved = hasPots && pots.every((_, i) => resolutions[i]);
 
             return (
                 <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
@@ -3206,238 +3231,311 @@
                         className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl p-5 bg-slate-800 text-white"
                         onClick={(e) => e.stopPropagation()}
                     >
-                        <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center justify-between mb-3">
                             <h3 className="text-lg font-bold flex items-center gap-2">🧮 Side Pot Calculator</h3>
                             <button onClick={onClose} className="text-slate-400 hover:text-white text-xl leading-none px-1">✕</button>
                         </div>
-                        <p className="text-xs text-slate-400 mb-4">
-                            Enter what each player has committed to the pot, mark their status, then calculate. This doesn't save to your Logbook -- it's just a quick scratchpad for working out the hand.
-                        </p>
 
-                        {/* Player rows */}
-                        <div className="space-y-2 mb-3">
-                            {rows.map((r, idx) => (
-                                <div key={r.id} className="bg-slate-900/60 rounded-lg p-2.5">
-                                    <div className="flex items-center gap-1.5 mb-2">
-                                        <div className="relative flex-grow">
-                                            <input
-                                                type="text"
-                                                value={r.name}
-                                                onChange={(e) => updateRow(r.id, { name: e.target.value })}
-                                                placeholder={`Player ${idx + 1}`}
-                                                className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 w-full text-sm text-slate-100"
-                                            />
-                                            {rosterPickerForId === r.id && (
-                                                <div className="absolute z-10 top-full left-0 mt-1 w-full max-h-40 overflow-y-auto bg-slate-950 border border-slate-700 rounded-lg shadow-xl p-2 flex flex-wrap gap-1.5">
-                                                    {roster.length === 0 ? (
-                                                        <p className="text-xs text-slate-500 italic p-1">No saved roster names yet</p>
-                                                    ) : roster.map(name => (
-                                                        <button
-                                                            key={name}
-                                                            onClick={() => { updateRow(r.id, { name }); setRosterPickerForId(null); }}
-                                                            className="px-2.5 py-1 rounded-full text-xs font-medium bg-slate-800 text-slate-100 hover:bg-slate-700"
-                                                        >
-                                                            {name}
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            )}
-                                        </div>
-                                        <button
-                                            onClick={() => setRosterPickerForId(prev => prev === r.id ? null : r.id)}
-                                            title="Pick from roster"
-                                            className={`w-9 h-9 flex-shrink-0 rounded-lg flex items-center justify-center text-sm ${rosterPickerForId === r.id ? selectedBtn : unselectedBtn}`}
-                                        >
-                                            👤
-                                        </button>
-                                        <DraftNumberInput
-                                            value={r.committed}
-                                            onChange={(v) => updateRow(r.id, { committed: v })}
-                                            min={0}
-                                            allowDecimal={true}
-                                            placeholder="$ Amount"
-                                            className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 w-28 flex-shrink-0 text-sm text-slate-100"
-                                        />
-                                        <button
-                                            onClick={() => removeRow(r.id)}
-                                            disabled={rows.length <= 2}
-                                            title="Remove player"
-                                            className="w-9 h-9 flex-shrink-0 rounded-lg flex items-center justify-center text-sm bg-slate-900 text-slate-500 hover:text-red-400 disabled:opacity-30 disabled:hover:text-slate-500"
-                                        >
-                                            🗑
-                                        </button>
-                                    </div>
-                                    <div className="flex gap-1.5">
-                                        {[['allin', 'All-In'], ['active', 'Active'], ['folded', 'Folded']].map(([val, label]) => (
-                                            <button
-                                                key={val}
-                                                onClick={() => updateRow(r.id, { status: val })}
-                                                className={`flex-1 py-1 rounded-md text-xs font-semibold ${r.status === val ? (val === 'folded' ? 'bg-red-600 text-white' : val === 'active' ? 'bg-emerald-600 text-white' : 'bg-blue-600 text-white') : unselectedBtn}`}
-                                            >
-                                                {label}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                            ))}
+                        {/* Step progress pills */}
+                        <div className="flex items-center gap-1.5 mb-4">
+                            {STEP_ORDER.map((key, idx) => {
+                                const reachable = canJumpTo(key);
+                                const isActive = step === key;
+                                return (
+                                    <button
+                                        key={key}
+                                        onClick={() => goToStep(key)}
+                                        disabled={!reachable}
+                                        className={`flex-1 py-2 rounded-lg text-center transition-colors ${isActive ? 'bg-blue-600 text-white' : reachable ? 'bg-slate-700 text-slate-200 hover:bg-slate-600' : 'bg-slate-900 text-slate-600 cursor-not-allowed'}`}
+                                    >
+                                        <span className="block text-[10px] font-semibold opacity-70 leading-none mb-0.5">{idx + 1}</span>
+                                        <span className="block text-xs font-semibold leading-none">{STEP_LABELS[key]}</span>
+                                    </button>
+                                );
+                            })}
                         </div>
 
-                        <div className="flex items-center justify-between mb-4">
-                            <button onClick={addRow} className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-700 hover:bg-slate-600 text-white">
-                                + Add Player
-                            </button>
-                            <p className="text-xs text-slate-400">Total entered: <span className="font-semibold text-slate-200">${enteredTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></p>
-                        </div>
-
-                        <button
-                            onClick={calculatePots}
-                            disabled={!canCalculate}
-                            className="w-full py-2.5 rounded-lg font-semibold bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-30 disabled:hover:bg-blue-600 mb-2"
-                        >
-                            Calculate Pots
-                        </button>
-                        {!canCalculate && (
-                            <p className="text-xs text-slate-500 text-center mb-2">Enter an amount for at least 2 players to calculate.</p>
-                        )}
-
-                        {/* Pot results */}
-                        {pots && pots.length > 0 && (
-                            <div className="mt-4 space-y-2.5 border-t border-slate-700 pt-4">
-                                {pots.map((pot, i) => {
-                                    const res = resolutions[i];
-                                    if (res) {
-                                        return (
-                                            <div key={i} className="bg-slate-900/60 rounded-lg p-3">
-                                                <div className="flex items-center justify-between mb-1">
-                                                    <p className="text-sm font-bold">{potLabel(i)} -- ${pot.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                                                    {res.mode !== 'auto' && (
-                                                        <button onClick={() => reopenPot(i)} className="text-xs text-slate-400 hover:text-white underline">Edit</button>
-                                                    )}
-                                                </div>
-                                                <p className="text-xs text-slate-300">
-                                                    {res.mode === 'auto' && 'Only one eligible player -- '}
-                                                    {res.winners.map((w, wi) => (
-                                                        <span key={wi}>{wi > 0 ? ', ' : ''}<span className="font-semibold text-emerald-400">{w.name}</span> +${w.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                                    ))}
-                                                </p>
-                                            </div>
-                                        );
-                                    }
-                                    const mode = activeMode[i];
-                                    return (
-                                        <div key={i} className="bg-slate-900/60 rounded-lg p-3">
-                                            <p className="text-sm font-bold mb-1">{potLabel(i)} -- ${pot.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                                            <p className="text-xs text-slate-400 mb-2">Eligible: {pot.eligible.join(', ')}</p>
-                                            <div className="flex gap-1.5 mb-2">
-                                                {['single', 'chop', 'percent'].map(m => (
-                                                    <button
-                                                        key={m}
-                                                        onClick={() => setActiveMode(prev => ({ ...prev, [i]: m }))}
-                                                        className={`flex-1 py-1 rounded-md text-xs font-semibold ${mode === m ? selectedBtn : unselectedBtn}`}
-                                                    >
-                                                        {m === 'single' ? 'Single Winner' : m === 'chop' ? 'Chop Evenly' : '% Split'}
-                                                    </button>
-                                                ))}
-                                            </div>
-
-                                            {mode === 'single' && (
-                                                <div className="flex flex-wrap gap-1.5">
-                                                    {pot.eligible.map(name => (
-                                                        <button
-                                                            key={name}
-                                                            onClick={() => resolveSingle(i, name)}
-                                                            className="px-2.5 py-1 rounded-full text-xs font-medium bg-slate-800 hover:bg-blue-600 text-slate-100"
-                                                        >
-                                                            {name}
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            )}
-
-                                            {mode === 'chop' && (
-                                                <div>
-                                                    <div className="flex flex-wrap gap-1.5 mb-1">
-                                                        {pot.eligible.map(name => {
-                                                            const sel = (chopSelections[i] || []).includes(name);
-                                                            return (
+                        {/* STEP 1: Players */}
+                        {step === 'players' && (
+                            <div>
+                                <p className="text-xs text-slate-400 mb-3">
+                                    Enter what each player has committed to the pot and mark their status. This doesn't save to your Logbook -- it's just a quick scratchpad for working out the hand.
+                                </p>
+                                <div className="space-y-2 mb-3">
+                                    {rows.map((r, idx) => (
+                                        <div key={r.id} className="bg-slate-900/60 rounded-lg p-2.5">
+                                            <div className="flex items-center gap-1.5 mb-2">
+                                                <div className="relative flex-grow">
+                                                    <input
+                                                        type="text"
+                                                        value={r.name}
+                                                        onChange={(e) => updateRow(r.id, { name: e.target.value })}
+                                                        placeholder={`Player ${idx + 1}`}
+                                                        className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 w-full text-sm text-slate-100"
+                                                    />
+                                                    {rosterPickerForId === r.id && (
+                                                        <div className="absolute z-10 top-full left-0 mt-1 w-full max-h-40 overflow-y-auto bg-slate-950 border border-slate-700 rounded-lg shadow-xl p-2 flex flex-wrap gap-1.5">
+                                                            {roster.length === 0 ? (
+                                                                <p className="text-xs text-slate-500 italic p-1">No saved roster names yet</p>
+                                                            ) : roster.map(name => (
                                                                 <button
                                                                     key={name}
-                                                                    onClick={() => toggleChopWinner(i, name)}
-                                                                    className={`px-2.5 py-1 rounded-full text-xs font-medium ${sel ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-100 hover:bg-slate-700'}`}
+                                                                    onClick={() => { updateRow(r.id, { name }); setRosterPickerForId(null); }}
+                                                                    className="px-2.5 py-1 rounded-full text-xs font-medium bg-slate-800 text-slate-100 hover:bg-slate-700"
                                                                 >
                                                                     {name}
                                                                 </button>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                    <p className="text-xs text-slate-500">Tap 2 or more to split evenly (odd cent goes to the first tapped).</p>
+                                                            ))}
+                                                        </div>
+                                                    )}
                                                 </div>
-                                            )}
+                                                <button
+                                                    onClick={() => setRosterPickerForId(prev => prev === r.id ? null : r.id)}
+                                                    title="Pick from roster"
+                                                    className={`w-9 h-9 flex-shrink-0 rounded-lg flex items-center justify-center text-sm ${rosterPickerForId === r.id ? selectedBtn : unselectedBtn}`}
+                                                >
+                                                    👤
+                                                </button>
+                                                <DraftNumberInput
+                                                    value={r.committed}
+                                                    onChange={(v) => updateRow(r.id, { committed: v })}
+                                                    min={0}
+                                                    allowDecimal={true}
+                                                    placeholder="$ Amount"
+                                                    className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 w-28 flex-shrink-0 text-sm text-slate-100"
+                                                />
+                                                <button
+                                                    onClick={() => removeRow(r.id)}
+                                                    disabled={rows.length <= 2}
+                                                    title="Remove player"
+                                                    className="w-9 h-9 flex-shrink-0 rounded-lg flex items-center justify-center text-sm bg-slate-900 text-slate-500 hover:text-red-400 disabled:opacity-30 disabled:hover:text-slate-500"
+                                                >
+                                                    🗑
+                                                </button>
+                                            </div>
+                                            <div className="flex gap-1.5">
+                                                {[['allin', 'All-In'], ['active', 'Active'], ['folded', 'Folded']].map(([val, label]) => (
+                                                    <button
+                                                        key={val}
+                                                        onClick={() => updateRow(r.id, { status: val })}
+                                                        className={`flex-1 py-1 rounded-md text-xs font-semibold ${r.status === val ? (val === 'folded' ? 'bg-red-600 text-white' : val === 'active' ? 'bg-emerald-600 text-white' : 'bg-blue-600 text-white') : unselectedBtn}`}
+                                                    >
+                                                        {label}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
 
-                                            {mode === 'percent' && (
-                                                <div>
-                                                    <div className="space-y-1.5 mb-2">
+                                <div className="flex items-center justify-between mb-4">
+                                    <button onClick={addRow} className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-700 hover:bg-slate-600 text-white">
+                                        + Add Player
+                                    </button>
+                                    <p className="text-xs text-slate-400">Total entered: <span className="font-semibold text-slate-200">{fmtMoney(enteredTotal)}</span></p>
+                                </div>
+
+                                <button
+                                    onClick={calculatePots}
+                                    disabled={!canCalculate}
+                                    className="w-full py-2.5 rounded-lg font-semibold bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-30 disabled:hover:bg-blue-600"
+                                >
+                                    Calculate Pots →
+                                </button>
+                                {!canCalculate && (
+                                    <p className="text-xs text-slate-500 text-center mt-2">Enter an amount for at least 2 players to calculate.</p>
+                                )}
+                            </div>
+                        )}
+
+                        {/* STEP 2: Pots overview */}
+                        {step === 'pots' && hasPots && (
+                            <div>
+                                <p className="text-xs text-slate-400 mb-3">
+                                    Here's how it splits based on what everyone committed. Each layer is its own pot, with only the players who reached that amount eligible to win it.
+                                </p>
+                                <div className="space-y-2 mb-4">
+                                    {pots.map((pot, i) => (
+                                        <div key={i} className="bg-slate-900/60 rounded-lg p-3">
+                                            <p className="text-sm font-bold">{potLabel(i)} -- {fmtMoney(pot.amount)}</p>
+                                            <p className="text-xs text-slate-400 mt-0.5">Eligible: {pot.eligible.join(', ')}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="flex gap-2">
+                                    <button onClick={() => setStep('players')} className="px-4 py-2.5 rounded-lg text-sm font-semibold border border-slate-600 text-slate-300 hover:bg-slate-700">
+                                        ← Back
+                                    </button>
+                                    <button onClick={() => setStep('winners')} className="flex-grow py-2.5 rounded-lg font-semibold bg-blue-600 hover:bg-blue-500 text-white">
+                                        Resolve Winners →
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* STEP 3: Winners */}
+                        {step === 'winners' && hasPots && (
+                            <div>
+                                <div className="space-y-2.5 mb-4">
+                                    {pots.map((pot, i) => {
+                                        const res = resolutions[i];
+                                        if (res) {
+                                            return (
+                                                <div key={i} className="bg-slate-900/60 rounded-lg p-3">
+                                                    <div className="flex items-center justify-between mb-1">
+                                                        <p className="text-sm font-bold">{potLabel(i)} -- {fmtMoney(pot.amount)}</p>
+                                                        {res.mode !== 'auto' && (
+                                                            <button onClick={() => reopenPot(i)} className="text-xs text-slate-400 hover:text-white underline">Edit</button>
+                                                        )}
+                                                    </div>
+                                                    <p className="text-xs text-slate-300">
+                                                        {res.mode === 'auto' && 'Only one eligible player -- '}
+                                                        {res.winners.map((w, wi) => (
+                                                            <span key={wi}>{wi > 0 ? ', ' : ''}<span className="font-semibold text-emerald-400">{w.name}</span> +{fmtMoney(w.amount)}</span>
+                                                        ))}
+                                                    </p>
+                                                </div>
+                                            );
+                                        }
+                                        const mode = activeMode[i];
+                                        return (
+                                            <div key={i} className="bg-slate-900/60 rounded-lg p-3">
+                                                <p className="text-sm font-bold mb-1">{potLabel(i)} -- {fmtMoney(pot.amount)}</p>
+                                                <p className="text-xs text-slate-400 mb-2">Eligible: {pot.eligible.join(', ')}</p>
+                                                <div className="flex gap-1.5 mb-2">
+                                                    {['single', 'chop', 'percent'].map(m => (
+                                                        <button
+                                                            key={m}
+                                                            onClick={() => setActiveMode(prev => ({ ...prev, [i]: m }))}
+                                                            className={`flex-1 py-1 rounded-md text-xs font-semibold ${mode === m ? selectedBtn : unselectedBtn}`}
+                                                        >
+                                                            {m === 'single' ? 'Single Winner' : m === 'chop' ? 'Chop Evenly' : '% Split'}
+                                                        </button>
+                                                    ))}
+                                                </div>
+
+                                                {mode === 'single' && (
+                                                    <div className="flex flex-wrap gap-1.5">
                                                         {pot.eligible.map(name => (
-                                                            <div key={name} className="flex items-center gap-2">
-                                                                <span className="text-xs text-slate-300 flex-grow">{name}</span>
-                                                                <DraftNumberInput
-                                                                    value={(pctDrafts[i] || {})[name] ?? null}
-                                                                    onChange={(v) => setPctDraft(i, name, v)}
-                                                                    min={0}
-                                                                    max={100}
-                                                                    allowDecimal={true}
-                                                                    placeholder="0"
-                                                                    className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 w-16 text-xs text-slate-100 text-right"
-                                                                />
-                                                                <span className="text-xs text-slate-500">%</span>
-                                                            </div>
+                                                            <button
+                                                                key={name}
+                                                                onClick={() => resolveSingle(i, name)}
+                                                                className="px-2.5 py-1 rounded-full text-xs font-medium bg-slate-800 hover:bg-blue-600 text-slate-100"
+                                                            >
+                                                                {name}
+                                                            </button>
                                                         ))}
                                                     </div>
-                                                    <div className="flex items-center justify-between">
-                                                        <p className={`text-xs ${Math.abs(pctSum(i, pot.eligible) - 100) < 0.01 ? 'text-emerald-400' : 'text-amber-400'}`}>
-                                                            Total: {pctSum(i, pot.eligible).toFixed(1)}%
-                                                        </p>
-                                                        <button
-                                                            onClick={() => confirmPctSplit(i)}
-                                                            disabled={Math.abs(pctSum(i, pot.eligible) - 100) > 0.01}
-                                                            className="px-3 py-1 rounded-md text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-30"
-                                                        >
-                                                            Confirm Split
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </div>
-                                    );
-                                })}
+                                                )}
 
-                                {/* Final summary */}
-                                <div className="bg-slate-950 rounded-lg p-3 mt-3 border border-slate-700">
+                                                {mode === 'chop' && (
+                                                    <div>
+                                                        <div className="flex flex-wrap gap-1.5 mb-1">
+                                                            {pot.eligible.map(name => {
+                                                                const sel = (chopSelections[i] || []).includes(name);
+                                                                return (
+                                                                    <button
+                                                                        key={name}
+                                                                        onClick={() => toggleChopWinner(i, name)}
+                                                                        className={`px-2.5 py-1 rounded-full text-xs font-medium ${sel ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-100 hover:bg-slate-700'}`}
+                                                                    >
+                                                                        {name}
+                                                                    </button>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                        <p className="text-xs text-slate-500">Tap 2 or more to split evenly (odd cent goes to the first tapped).</p>
+                                                    </div>
+                                                )}
+
+                                                {mode === 'percent' && (
+                                                    <div>
+                                                        <div className="space-y-1.5 mb-2">
+                                                            {pot.eligible.map(name => (
+                                                                <div key={name} className="flex items-center gap-2">
+                                                                    <span className="text-xs text-slate-300 flex-grow">{name}</span>
+                                                                    <DraftNumberInput
+                                                                        value={(pctDrafts[i] || {})[name] ?? null}
+                                                                        onChange={(v) => setPctDraft(i, name, v)}
+                                                                        min={0}
+                                                                        max={100}
+                                                                        allowDecimal={true}
+                                                                        placeholder="0"
+                                                                        className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 w-16 text-xs text-slate-100 text-right"
+                                                                    />
+                                                                    <span className="text-xs text-slate-500">%</span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                        <div className="flex items-center justify-between">
+                                                            <p className={`text-xs ${Math.abs(pctSum(i, pot.eligible) - 100) < 0.01 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                                                                Total: {pctSum(i, pot.eligible).toFixed(1)}%
+                                                            </p>
+                                                            <button
+                                                                onClick={() => confirmPctSplit(i)}
+                                                                disabled={Math.abs(pctSum(i, pot.eligible) - 100) > 0.01}
+                                                                className="px-3 py-1 rounded-md text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-30"
+                                                            >
+                                                                Confirm Split
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                                <div className="flex gap-2">
+                                    <button onClick={() => setStep('pots')} className="px-4 py-2.5 rounded-lg text-sm font-semibold border border-slate-600 text-slate-300 hover:bg-slate-700">
+                                        ← Back
+                                    </button>
+                                    <button onClick={() => setStep('payout')} className="flex-grow py-2.5 rounded-lg font-semibold bg-blue-600 hover:bg-blue-500 text-white">
+                                        {allResolved ? 'View Payout →' : `View Payout (${Object.keys(resolutions).length}/${pots.length} resolved) →`}
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* STEP 4: Payout */}
+                        {step === 'payout' && hasPots && (
+                            <div>
+                                <div className="bg-slate-950 rounded-lg p-3 mb-4 border border-slate-700">
                                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1.5">
-                                        {pots.every((_, i) => resolutions[i]) ? 'Final Payouts' : `Payouts so far (${Object.keys(resolutions).length} of ${pots.length} pots resolved)`}
+                                        {allResolved ? 'Final Payouts' : `Payouts so far (${Object.keys(resolutions).length} of ${pots.length} pots resolved)`}
                                     </p>
                                     {Object.keys(totalsByPlayer).length === 0 ? (
-                                        <p className="text-xs text-slate-500 italic">Assign a winner to each pot above to see payouts.</p>
+                                        <p className="text-xs text-slate-500 italic">No pots resolved yet -- go back to Winners to assign them.</p>
                                     ) : (
                                         <div className="space-y-0.5">
                                             {Object.entries(totalsByPlayer).sort((a, b) => b[1] - a[1]).map(([name, amount]) => (
                                                 <p key={name} className="text-sm">
-                                                    <span className="font-semibold">{name}</span>: <span className="text-emerald-400 font-semibold">+${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                                    <span className="font-semibold">{name}</span>: <span className="text-emerald-400 font-semibold">+{fmtMoney(amount)}</span>
                                                 </p>
                                             ))}
                                         </div>
                                     )}
                                 </div>
+                                <div className="flex gap-2 mb-2">
+                                    <button onClick={() => setStep('winners')} className="px-4 py-2.5 rounded-lg text-sm font-semibold border border-slate-600 text-slate-300 hover:bg-slate-700">
+                                        ← Back
+                                    </button>
+                                    <button onClick={resetAll} className="flex-grow py-2.5 rounded-lg font-semibold bg-slate-700 hover:bg-slate-600 text-white">
+                                        Start New Hand
+                                    </button>
+                                </div>
                             </div>
                         )}
 
-                        <button onClick={resetAll} className="w-full mt-4 py-2 rounded-lg text-xs font-semibold border border-slate-600 text-slate-300 hover:bg-slate-700">
-                            Reset for New Hand
-                        </button>
+                        {step !== 'players' && (
+                            <button onClick={resetAll} className="w-full mt-3 py-2 rounded-lg text-xs font-semibold text-slate-500 hover:text-slate-300">
+                                Reset everything and start over
+                            </button>
+                        )}
                     </div>
                 </div>
             );
         };
+
 
         const HomeView = ({ onSelectMode, theme, headingTextColorClass, mainCardBgClass, isPro }) => {
             console.log("HomeView component rendering");
@@ -3584,6 +3682,15 @@
             const lastDataPushAtRef = useRef(0);
             const hasMountedSyncRef = useRef(false);
             const hasMountedDataSyncRef = useRef(false);
+            // Absolute-time clock + echo-proof sync plumbing (see the sync effects below)
+            const endsAtRef = useRef(null);          // epoch ms at which the running level ends
+            const lastTickValueRef = useRef(null);   // last whole-second value the ticker itself produced
+            const syncReadyRef = useRef(false);      // true once the first remote snapshot (or a fallback) has landed
+            const lastTimerSigRef = useRef('');      // signature of the last timer state we pushed / received
+            const lastDataSigRef = useRef('');       // signature of the last data state we pushed / received
+            const timerPushTimeoutRef = useRef(null);
+            const liveStateRef = useRef({});         // always-current state, readable from timeouts / listeners
+            const remoteLevelRef = useRef(null);     // level index just applied from another device
 
 
             // New states for Payout structure
@@ -3817,6 +3924,14 @@
             const timerIntervalRef = useRef(null);
             const audioRef = useRef(null); // For sound effects
             const prevLevelIndex = useRef(currentLevelIndex); // Ref to track actual level changes
+
+            // Snapshot of the in-progress level's original duration, taken the
+            // moment the Level Structure editor is opened. Lets Save Blinds tell
+            // "this is the level we're currently sitting on and its duration
+            // just changed" apart from a full structure rebuild (Smart Builder,
+            // adding/removing levels) -- in the former case we adjust the clock
+            // by the difference instead of snapping it to the new duration.
+            const editingLevelSnapshotRef = useRef(null);
 
             const [alarmSoundEnabled, setAlarmSoundEnabled] = useState(() => {
                 const saved = localStorage.getItem('tournamentAlarmSoundEnabled');
@@ -4052,8 +4167,14 @@ stack = Math.round(stack / roundingUnit) * roundingUnit;
 
                 // Check if currentLevelIndex has actually changed, not just a re-render
                 if (currentLevelIndex !== prevLevelIndex.current) {
-                    const newLevelDuration = levels[currentLevelIndex]?.duration || 0;
-                    setTimeRemaining(newLevelDuration * 60);
+                    if (remoteLevelRef.current === currentLevelIndex) {
+                        // This level change came from another device along with its
+                        // own clock value -- don't overwrite that with a full reset.
+                        remoteLevelRef.current = null;
+                    } else {
+                        const newLevelDuration = levels[currentLevelIndex]?.duration || 0;
+                        setTimeRemaining(newLevelDuration * 60);
+                    }
                 }
                 // Also set time if it's the very first load and time is 0
                 else if (timeRemaining === 0 && currentLevelIndex === 0 && levels[0]) {
@@ -4073,91 +4194,117 @@ stack = Math.round(stack / roundingUnit) * roundingUnit;
 
 
 
-            // Effect 2: Manage the countdown interval based on isRunning and timeRemaining
-            useEffect(() => {
-                if (isRunning && timeRemaining > 0) {
-                    timerIntervalRef.current = setInterval(() => {
-                        setTimeRemaining(prev => {
-                            if (prev <= 1) { // Time runs out
-                                clearInterval(timerIntervalRef.current);
-                                if (alarmSoundEnabled) {
-                                    playAlarmSound(selectedAlarmSound, audioRef.current);
-                                }
-                                // Advance the level using the FUNCTIONAL setState form,
-                                // rather than reading currentLevelIndex/currentLevel from
-                                // this effect's own closure. This used to be a real bug:
-                                // setCurrentLevelIndex(currentLevelIndex + 1) captured
-                                // currentLevelIndex from whenever this interval was
-                                // created, not necessarily the live value -- if the
-                                // interval was ever created/recreated with a
-                                // now-outdated index still in memory, this would advance
-                                // to the wrong level (or silently fail to advance at
-                                // all, landing back on the same index). Looking up the
-                                // level to check isBreak/bounds using the updater's own
-                                // prevIndex, instead of the outer closure's variables,
-                                // removes the staleness risk entirely.
-                                setCurrentLevelIndex(prevIndex => {
-                                    const levelJustFinished = levels[prevIndex];
-                                    if (levelJustFinished && levelJustFinished.isBreak) {
-                                        setIsRunning(false); // Pause the timer
-                                        return prevIndex; // Stay put until manually advanced
-                                    } else if (prevIndex < levels.length - 1) {
-                                        return prevIndex + 1; // Auto-advance; Effect 1 will set the new level's time
-                                    } else {
-                                        setIsRunning(false); // End of tournament
-                                        return prevIndex;
-                                    }
-                                });
-                                return 0; // Set to 0 temporarily, will be overwritten by Effect 1 if a new level started
-                            }
-                            return prev - 1;
-                        });
-                    }, 1000);
-                } else {
-                    // If not running or time is 0, ensure interval is cleared
-                    clearInterval(timerIntervalRef.current);
-                }
-                return () => clearInterval(timerIntervalRef.current); // Cleanup on unmount/re-render
-            }, [isRunning, timeRemaining, levels, alarmSoundEnabled, selectedAlarmSound]); // currentLevelIndex/currentLevel deliberately removed -- level lookups now happen inside the functional updater instead, using the live prevIndex
+            // Keep a always-current snapshot of synced state for timeouts/listeners.
+            liveStateRef.current = { currentLevelIndex, timeRemaining, isRunning, syncNonce, payoutStructure, numPlayers, rebuyCount, addOnCount };
 
-            // Effect 2b: Push clock state to Firestore on start/pause/level-change/
-            // reset (Pro only) so another device viewing the same tournament can
-            // pick it up. Deliberately NOT watching timeRemaining directly --
-            // that changes every second while running, which would mean a
-            // write every second. Instead the receiving device recalculates
-            // "time remaining right now" using the timestamp of this write.
+            const makeTimerSig = (st, endsAt) =>
+                `${st.currentLevelIndex}|${st.isRunning ? 1 : 0}|${st.isRunning ? endsAt : st.timeRemaining}|${st.syncNonce}`;
+            const dataSigFrom = (v) => JSON.stringify([v.payoutStructure ?? null, v.numPlayers ?? null, v.rebuyCount ?? null, v.addOnCount ?? null]);
+
+            // Effect 2: ABSOLUTE-TIME clock. While running we remember the exact
+            // moment the level ends (endsAtRef) and every tick just derives the
+            // seconds left from the real clock. That keeps the countdown accurate
+            // even if the browser throttles timers (screen off, background tab),
+            // and it's what lets two devices show the same time: they share the
+            // end moment instead of each decrementing their own counter.
+            // Any change to timeRemaining that did NOT come from the ticker
+            // itself (start, reset, level change, edits, a sync update) re-arms
+            // the end moment from the new value.
+            useEffect(() => {
+                if (!isRunning) { endsAtRef.current = null; lastTickValueRef.current = null; return; }
+                if (timeRemaining > 0 && timeRemaining !== lastTickValueRef.current) {
+                    endsAtRef.current = Date.now() + timeRemaining * 1000;
+                    lastTickValueRef.current = timeRemaining;
+                }
+            }, [isRunning, timeRemaining]);
+
+            useEffect(() => {
+                if (!isRunning) return;
+                const id = setInterval(() => {
+                    if (endsAtRef.current === null) return;
+                    const msLeft = endsAtRef.current - Date.now();
+                    if (msLeft > 0) {
+                        const secs = Math.ceil(msLeft / 1000);
+                        if (secs !== lastTickValueRef.current) {
+                            lastTickValueRef.current = secs;
+                            setTimeRemaining(secs);
+                        }
+                        return;
+                    }
+                    // Level time is up
+                    endsAtRef.current = null;
+                    lastTickValueRef.current = 0;
+                    setTimeRemaining(0);
+                    if (alarmSoundEnabled) {
+                        playAlarmSound(selectedAlarmSound, audioRef.current);
+                    }
+                    // Advance using the FUNCTIONAL form so we never act on a stale index
+                    setCurrentLevelIndex(prevIndex => {
+                        const levelJustFinished = levels[prevIndex];
+                        if (levelJustFinished && levelJustFinished.isBreak) {
+                            setIsRunning(false); // Pause until manually advanced
+                            return prevIndex;
+                        } else if (prevIndex < levels.length - 1) {
+                            return prevIndex + 1; // Effect 1 sets the new level's time
+                        } else {
+                            setIsRunning(false); // End of tournament
+                            return prevIndex;
+                        }
+                    });
+                }, 250);
+                return () => clearInterval(id);
+            }, [isRunning, levels, alarmSoundEnabled, selectedAlarmSound]);
+
+            // Effect 2b: publish clock state (Pro only) -- but ONLY when something
+            // actually changed on THIS device. A signature of the state we last
+            // pushed or received is compared first, so applying another device's
+            // update (or finishing the initial load) never bounces back out as a
+            // new write. That bounce was the cause of devices overwriting each
+            // other. The write is deferred ~150ms and built from the latest
+            // state, so level changes (which reset the time one render later)
+            // publish the settled value instead of a half-updated one.
             useEffect(() => {
                 if (!isPro || !authUser || !liveSyncEnabled) { setLiveSyncActive(false); return; }
-                if (!hasMountedSyncRef.current) { hasMountedSyncRef.current = true; return; } // skip the initial mount
-                const payload = {
-                    currentLevelIndex,
-                    timeRemaining,
-                    isRunning,
-                    timerUpdatedAt: Date.now(),
-                };
-                lastTimerPushAtRef.current = payload.timerUpdatedAt;
-                window.__firebaseDb.collection('liveClockSync').doc(`${authUser.uid}_tournament`)
-                    .set(payload, { merge: true })
-                    .then(() => setLiveSyncActive(true))
-                    .catch(e => console.error('Clock sync push failed:', e));
+                clearTimeout(timerPushTimeoutRef.current);
+                if (!syncReadyRef.current) return;
+                const st = liveStateRef.current;
+                if (makeTimerSig(st, st.isRunning ? endsAtRef.current : null) === lastTimerSigRef.current) return;
+                timerPushTimeoutRef.current = setTimeout(() => {
+                    const cur = liveStateRef.current;
+                    const running = !!cur.isRunning;
+                    const endsAt = running ? endsAtRef.current : null;
+                    const payload = {
+                        currentLevelIndex: cur.currentLevelIndex,
+                        timeRemaining: cur.timeRemaining,
+                        isRunning: running,
+                        endsAt,
+                        timerUpdatedAt: Date.now(),
+                    };
+                    lastTimerSigRef.current = makeTimerSig(cur, endsAt);
+                    lastTimerPushAtRef.current = payload.timerUpdatedAt;
+                    window.__firebaseDb.collection('liveClockSync').doc(`${authUser.uid}_tournament`)
+                        .set(payload, { merge: true })
+                        .then(() => setLiveSyncActive(true))
+                        .catch(e => console.error('Clock sync push failed:', e));
+                }, 150);
+                return () => clearTimeout(timerPushTimeoutRef.current);
                 // eslint-disable-next-line react-hooks/exhaustive-deps
-            }, [isRunning, currentLevelIndex, syncNonce, isPro, authUser, liveSyncEnabled]);
+            }, [isRunning, currentLevelIndex, timeRemaining, syncNonce, isPro, authUser, liveSyncEnabled]);
 
-            // Push payout/player-count data separately -- never includes
-            // timeRemaining/isRunning/currentLevelIndex, so a payout or
-            // player-count change on one device can never overwrite the
-            // running timer on other devices with this device's own
-            // (possibly stale) values. That was a real bug: bundling
-            // everything into one push meant editing payouts or bumping the
-            // player count silently reset the timer on every synced screen.
+            // Payout / player-count data, published separately (never includes the
+            // clock fields) and only when it really changed locally.
             useEffect(() => {
                 if (!isPro || !authUser || !liveSyncEnabled) return;
-                if (!hasMountedDataSyncRef.current) { hasMountedDataSyncRef.current = true; return; }
+                if (!syncReadyRef.current) return;
+                const st = liveStateRef.current;
+                const sig = dataSigFrom(st);
+                if (sig === lastDataSigRef.current) return;
+                lastDataSigRef.current = sig;
                 const payload = {
-                    payoutStructure,
-                    numPlayers,
-                    rebuyCount,
-                    addOnCount,
+                    payoutStructure: st.payoutStructure ?? [],
+                    numPlayers: st.numPlayers ?? 0,
+                    rebuyCount: st.rebuyCount ?? 0,
+                    addOnCount: st.addOnCount ?? 0,
                     dataUpdatedAt: Date.now(),
                 };
                 lastDataPushAtRef.current = payload.dataUpdatedAt;
@@ -4167,27 +4314,60 @@ stack = Math.round(stack / roundingUnit) * roundingUnit;
                 // eslint-disable-next-line react-hooks/exhaustive-deps
             }, [isPro, authUser, liveSyncEnabled, payoutStructure, numPlayers, rebuyCount, addOnCount]);
 
-            // Effect 2c: Listen for clock state pushed from another device.
-            // Timer fields and data fields are checked against their own
-            // separate timestamps, since they now arrive as independent writes.
+            // Effect 2c: listen for updates from another device. The first
+            // snapshot after (re)connecting decides the starting state; until it
+            // lands (or 4s pass with no answer) this device publishes nothing.
             useEffect(() => {
                 if (!isPro || !authUser || !liveSyncEnabled) return;
+                syncReadyRef.current = false;
+                const markReadyFromLocal = () => {
+                    const st = liveStateRef.current;
+                    lastTimerSigRef.current = makeTimerSig(st, st.isRunning ? endsAtRef.current : null);
+                    lastDataSigRef.current = dataSigFrom(st);
+                    syncReadyRef.current = true;
+                };
+                const readyFallback = setTimeout(() => { if (!syncReadyRef.current) markReadyFromLocal(); }, 4000);
                 const unsubscribe = window.__firebaseDb.collection('liveClockSync').doc(`${authUser.uid}_tournament`)
                     .onSnapshot(snapshot => {
                         if (snapshot.metadata.hasPendingWrites) return;
                         const data = snapshot.data();
+                        if (!syncReadyRef.current) markReadyFromLocal(); // baseline = local; doc values below override it
                         if (!data) return;
+                        const st = liveStateRef.current;
 
                         if (typeof data.timerUpdatedAt === 'number' && data.timerUpdatedAt !== lastTimerPushAtRef.current) {
-                            const elapsedSec = data.isRunning ? Math.max(0, Math.floor((Date.now() - data.timerUpdatedAt) / 1000)) : 0;
-                            const adjustedTime = Math.max(0, (data.timeRemaining || 0) - elapsedSec);
-                            setCurrentLevelIndex(data.currentLevelIndex ?? 0);
-                            setTimeRemaining(adjustedTime);
-                            setIsRunning(!!data.isRunning);
+                            const idx = typeof data.currentLevelIndex === 'number' ? data.currentLevelIndex : 0;
+                            let running = !!data.isRunning;
+                            let remaining = Math.max(0, data.timeRemaining || 0);
+                            let newEndsAt = null;
+                            if (running) {
+                                if (typeof data.endsAt === 'number') {
+                                    newEndsAt = data.endsAt;
+                                    remaining = Math.max(0, Math.ceil((newEndsAt - Date.now()) / 1000));
+                                } else { // older-format write: estimate from its timestamp
+                                    const elapsed = Math.max(0, Math.floor((Date.now() - data.timerUpdatedAt) / 1000));
+                                    remaining = Math.max(0, remaining - elapsed);
+                                    newEndsAt = Date.now() + remaining * 1000;
+                                }
+                                if (remaining <= 0) { running = false; newEndsAt = null; } // already over: show 0, paused
+                            }
+                            endsAtRef.current = running ? newEndsAt : null;
+                            lastTickValueRef.current = running ? remaining : null;
+                            lastTimerSigRef.current = makeTimerSig({ currentLevelIndex: idx, isRunning: running, timeRemaining: remaining, syncNonce: st.syncNonce }, newEndsAt);
+                            remoteLevelRef.current = idx !== st.currentLevelIndex ? idx : null;
+                            setCurrentLevelIndex(idx);
+                            setTimeRemaining(remaining);
+                            setIsRunning(running);
                             setLiveSyncActive(true);
                         }
 
                         if (typeof data.dataUpdatedAt === 'number' && data.dataUpdatedAt !== lastDataPushAtRef.current) {
+                            lastDataSigRef.current = dataSigFrom({
+                                payoutStructure: Array.isArray(data.payoutStructure) ? data.payoutStructure : st.payoutStructure,
+                                numPlayers: typeof data.numPlayers === 'number' ? data.numPlayers : st.numPlayers,
+                                rebuyCount: typeof data.rebuyCount === 'number' ? data.rebuyCount : st.rebuyCount,
+                                addOnCount: typeof data.addOnCount === 'number' ? data.addOnCount : st.addOnCount,
+                            });
                             if (Array.isArray(data.payoutStructure)) setPayoutStructure(data.payoutStructure);
                             if (typeof data.numPlayers === 'number') setNumPlayers(data.numPlayers);
                             if (typeof data.rebuyCount === 'number') setRebuyCount(data.rebuyCount);
@@ -4195,8 +4375,8 @@ stack = Math.round(stack / roundingUnit) * roundingUnit;
                             setLiveSyncActive(true);
                         }
                     }, e => console.error('Clock sync listener error:', e));
-                return () => unsubscribe();
-            }, [isPro, authUser]);
+                return () => { unsubscribe(); clearTimeout(readyFallback); };
+            }, [isPro, authUser, liveSyncEnabled]);
 
             // Effect 3: Calculate rebuy time remaining
             useEffect(() => {
@@ -4406,12 +4586,27 @@ stack = Math.round(stack / roundingUnit) * roundingUnit;
 
             const handleSaveLevels = (newLevels) => {
                 setLevels(newLevels);
-                // After saving, reset current level time based on the new structure
-                if (newLevels.length > 0) {
-                    setTimeRemaining(newLevels[currentLevelIndex]?.duration * 60 || 0);
+                const newCurrentLevel = newLevels[currentLevelIndex];
+                const snapshot = editingLevelSnapshotRef.current;
+                if (newCurrentLevel && snapshot && snapshot.id === newCurrentLevel.id) {
+                    // Same level we were already sitting on -- adjust the clock
+                    // by however much its duration changed (nothing at all if
+                    // duration wasn't touched, e.g. only blinds were edited)
+                    // instead of resetting it, so time already played in this
+                    // level isn't wiped out.
+                    const deltaSeconds = (newCurrentLevel.duration - snapshot.duration) * 60;
+                    if (deltaSeconds !== 0) {
+                        setTimeRemaining(prev => Math.max(0, prev + deltaSeconds));
+                    }
+                } else if (newLevels.length > 0) {
+                    // Structure was rebuilt (levels added/removed/regenerated) --
+                    // no meaningful "elapsed time" to preserve, so start the
+                    // (possibly different) current level fresh, as before.
+                    setTimeRemaining(newCurrentLevel?.duration * 60 || 0);
                 } else {
                     setTimeRemaining(0);
                 }
+                editingLevelSnapshotRef.current = null;
                 setShowSettings(false); // Close settings after saving
             };
 			
@@ -5675,7 +5870,11 @@ const getPerPlayerCountForChip = (chipId) => {
                                         </div>
 
                                         <button
-                                            onClick={() => setTournamentSettingsSubView('blinds')}
+                                            onClick={() => {
+                                                const current = levels[currentLevelIndex];
+                                                editingLevelSnapshotRef.current = current ? { id: current.id, duration: current.duration } : null;
+                                                setTournamentSettingsSubView('blinds');
+                                            }}
                                             className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
                                         >
                                             Level Structure Settings
@@ -6894,6 +7093,15 @@ const getPerPlayerCountForChip = (chipId) => {
             const lastDataPushAtRef = useRef(0);
             const hasMountedSyncRef = useRef(false);
             const hasMountedDataSyncRef = useRef(false);
+            // Absolute-time clock + echo-proof sync plumbing (see the sync effects below)
+            const endsAtRef = useRef(null);          // epoch ms at which the running level ends
+            const lastTickValueRef = useRef(null);   // last whole-second value the ticker itself produced
+            const syncReadyRef = useRef(false);      // true once the first remote snapshot (or a fallback) has landed
+            const lastTimerSigRef = useRef('');      // signature of the last timer state we pushed / received
+            const lastDataSigRef = useRef('');       // signature of the last data state we pushed / received
+            const timerPushTimeoutRef = useRef(null);
+            const liveStateRef = useRef({});         // always-current state, readable from timeouts / listeners
+            const remoteLevelRef = useRef(null);     // level index just applied from another device
 
             const [inputDuration, setInputDuration] = useState(60); // Changed default from 30 to 60
             const [pokerHands, setPokerHands] = useState([]);
@@ -7560,13 +7768,47 @@ useEffect(() => { localStorage.setItem('showSquidGame', JSON.stringify(showSquid
 
             const hasPlayedAlarmRef = useRef(false);
 
-            // Timer interval logic
+            liveStateRef.current = {
+                timeRemaining, isRunning, syncNonce,
+                currentHighHandId, pokerHands, badBeatJackpotAmount, showBadBeatJackpot,
+                sevenDeuceBounty, nitGameBounty, squidGameBounty,
+                show7DeuceGame, showNitGame, showSquidGame,
+            };
+            const CASH_DATA_KEYS = ['currentHighHandId', 'pokerHands', 'badBeatJackpotAmount', 'showBadBeatJackpot', 'sevenDeuceBounty', 'nitGameBounty', 'squidGameBounty', 'show7DeuceGame', 'showNitGame', 'showSquidGame'];
+            const makeTimerSig = (st, endsAt) => `${st.isRunning ? 1 : 0}|${st.isRunning ? endsAt : st.timeRemaining}|${st.syncNonce}`;
+            const dataSigFrom = (v) => JSON.stringify(CASH_DATA_KEYS.map(k => v[k] ?? null));
+
+            // ABSOLUTE-TIME clock, same design as the Tournament clock: while
+            // running we remember the exact moment time runs out and every tick
+            // derives the seconds left from the real clock. Accurate through
+            // screen-off / background throttling, and two devices share the end
+            // moment instead of each decrementing their own counter. Any change
+            // to timeRemaining that didn't come from the ticker re-arms it.
             useEffect(() => {
-                if (isRunning && timeRemaining > 0) {
-                    hasPlayedAlarmRef.current = false; // reset so the next zero-crossing can play again
-                    timerRef.current = setInterval(() => setTimeRemaining((prevTime) => prevTime - 1), 1000);
-                } else if (timeRemaining === 0) {
-                    clearInterval(timerRef.current);
+                if (!isRunning) { endsAtRef.current = null; lastTickValueRef.current = null; return; }
+                if (timeRemaining > 0 && timeRemaining !== lastTickValueRef.current) {
+                    hasPlayedAlarmRef.current = false; // a fresh run can alarm again
+                    endsAtRef.current = Date.now() + timeRemaining * 1000;
+                    lastTickValueRef.current = timeRemaining;
+                }
+            }, [isRunning, timeRemaining]);
+
+            useEffect(() => {
+                if (!isRunning) return;
+                const id = setInterval(() => {
+                    if (endsAtRef.current === null) return;
+                    const msLeft = endsAtRef.current - Date.now();
+                    if (msLeft > 0) {
+                        const secs = Math.ceil(msLeft / 1000);
+                        if (secs !== lastTickValueRef.current) {
+                            lastTickValueRef.current = secs;
+                            setTimeRemaining(secs);
+                        }
+                        return;
+                    }
+                    endsAtRef.current = null;
+                    lastTickValueRef.current = 0;
+                    setTimeRemaining(0);
                     setIsRunning(false);
                     if (!hasPlayedAlarmRef.current) {
                         hasPlayedAlarmRef.current = true;
@@ -7574,50 +7816,51 @@ useEffect(() => { localStorage.setItem('showSquidGame', JSON.stringify(showSquid
                             playAlarmSound(selectedAlarmSound, audioRef.current);
                         }
                     }
-                }
-                return () => clearInterval(timerRef.current);
-            }, [isRunning, timeRemaining, alarmSoundEnabled, selectedAlarmSound]);
+                }, 250);
+                return () => clearInterval(id);
+            }, [isRunning, alarmSoundEnabled, selectedAlarmSound]);
 
-            // Push TIMER state only (Pro only) -- kept strictly separate from
-            // the data push below, and uses merge:true, so a change made on
-            // one device (e.g. setting a high hand) can never overwrite the
-            // running timer on other devices with this device's own
-            // (possibly stale/different) timeRemaining value. That was a real
-            // bug: bundling everything into one push meant setting a high
-            // hand -- or any bounty/toggle change -- silently reset the
-            // timer on every other synced screen.
+            // Publish clock state (Pro only) -- only when something really changed
+            // on THIS device. Comparing against a signature of the last state we
+            // pushed or received means applying another device's update (or the
+            // initial load) never echoes back out as a new write. Deferred ~150ms
+            // and built from the latest state so the published value has settled.
             useEffect(() => {
                 if (!isPro || !authUser || !liveSyncEnabled) { setLiveSyncActive(false); return; }
-                if (!hasMountedSyncRef.current) { hasMountedSyncRef.current = true; return; }
-                const payload = { timeRemaining, isRunning, timerUpdatedAt: Date.now() };
-                lastTimerPushAtRef.current = payload.timerUpdatedAt;
-                window.__firebaseDb.collection('liveClockSync').doc(`${authUser.uid}_cash`)
-                    .set(payload, { merge: true })
-                    .then(() => setLiveSyncActive(true))
-                    .catch(e => console.error('Clock sync push failed:', e));
+                clearTimeout(timerPushTimeoutRef.current);
+                if (!syncReadyRef.current) return;
+                const st = liveStateRef.current;
+                if (makeTimerSig(st, st.isRunning ? endsAtRef.current : null) === lastTimerSigRef.current) return;
+                timerPushTimeoutRef.current = setTimeout(() => {
+                    const cur = liveStateRef.current;
+                    const running = !!cur.isRunning;
+                    const endsAt = running ? endsAtRef.current : null;
+                    const payload = { timeRemaining: cur.timeRemaining, isRunning: running, endsAt, timerUpdatedAt: Date.now() };
+                    lastTimerSigRef.current = makeTimerSig(cur, endsAt);
+                    lastTimerPushAtRef.current = payload.timerUpdatedAt;
+                    window.__firebaseDb.collection('liveClockSync').doc(`${authUser.uid}_cash`)
+                        .set(payload, { merge: true })
+                        .then(() => setLiveSyncActive(true))
+                        .catch(e => console.error('Clock sync push failed:', e));
+                }, 150);
+                return () => clearTimeout(timerPushTimeoutRef.current);
                 // eslint-disable-next-line react-hooks/exhaustive-deps
-            }, [isRunning, syncNonce, isPro, authUser, liveSyncEnabled]);
+            }, [isRunning, timeRemaining, syncNonce, isPro, authUser, liveSyncEnabled]);
 
-            // Push high hand / bounty / toggle state separately -- never
-            // includes timeRemaining or isRunning, so it can't clobber the
-            // timer push above.
+            // High hand list / bounty / toggle state, published separately (never
+            // includes the clock fields) and only when it changed locally. The FULL
+            // hand list goes along, so both devices stay identical and removals
+            // carry over too.
             useEffect(() => {
                 if (!isPro || !authUser || !liveSyncEnabled) return;
-                if (!hasMountedDataSyncRef.current) { hasMountedDataSyncRef.current = true; return; }
-                const currentHand = Array.isArray(pokerHands) ? pokerHands.find(h => h.id === currentHighHandId) : undefined;
-                const payload = {
-                    currentHighHandId,
-                    currentHighHandData: currentHand || null,
-                    badBeatJackpotAmount,
-                    showBadBeatJackpot,
-                    sevenDeuceBounty,
-                    nitGameBounty,
-                    squidGameBounty,
-                    show7DeuceGame,
-                    showNitGame,
-                    showSquidGame,
-                    dataUpdatedAt: Date.now(),
-                };
+                if (!syncReadyRef.current) return;
+                const st = liveStateRef.current;
+                const sig = dataSigFrom(st);
+                if (sig === lastDataSigRef.current) return;
+                lastDataSigRef.current = sig;
+                const payload = { dataUpdatedAt: Date.now() };
+                CASH_DATA_KEYS.forEach(k => { payload[k] = st[k] ?? null; });
+                if (!Array.isArray(payload.pokerHands)) payload.pokerHands = [];
                 lastDataPushAtRef.current = payload.dataUpdatedAt;
                 window.__firebaseDb.collection('liveClockSync').doc(`${authUser.uid}_cash`)
                     .set(payload, { merge: true })
@@ -7627,38 +7870,77 @@ useEffect(() => { localStorage.setItem('showSquidGame', JSON.stringify(showSquid
                 badBeatJackpotAmount, showBadBeatJackpot, sevenDeuceBounty, nitGameBounty, squidGameBounty,
                 show7DeuceGame, showNitGame, showSquidGame]);
 
-            // Listen for clock state pushed from another device. Timer fields
-            // and data fields are checked against their own separate
-            // timestamps, since they now arrive as independent writes.
+            // Listen for updates from another device. The first snapshot after
+            // (re)connecting decides the starting state; until it lands (or 4s
+            // pass with no answer) this device publishes nothing -- which is what
+            // stops a freshly opened screen from pushing its stale saved hand over
+            // the one you just set on another device.
             useEffect(() => {
                 if (!isPro || !authUser || !liveSyncEnabled) return;
+                syncReadyRef.current = false;
+                let firstSnapshot = true;
+                const markReadyFromLocal = () => {
+                    const st = liveStateRef.current;
+                    lastTimerSigRef.current = makeTimerSig(st, st.isRunning ? endsAtRef.current : null);
+                    lastDataSigRef.current = dataSigFrom(st);
+                    syncReadyRef.current = true;
+                };
+                const readyFallback = setTimeout(() => { if (!syncReadyRef.current) markReadyFromLocal(); }, 4000);
                 const unsubscribe = window.__firebaseDb.collection('liveClockSync').doc(`${authUser.uid}_cash`)
                     .onSnapshot(snapshot => {
                         if (snapshot.metadata.hasPendingWrites) return;
                         const data = snapshot.data();
+                        if (!syncReadyRef.current) markReadyFromLocal(); // baseline = local; doc values below override it
+                        const isFirst = firstSnapshot;
+                        firstSnapshot = false;
                         if (!data) return;
+                        const st = liveStateRef.current;
 
                         if (typeof data.timerUpdatedAt === 'number' && data.timerUpdatedAt !== lastTimerPushAtRef.current) {
-                            const elapsedSec = data.isRunning ? Math.max(0, Math.floor((Date.now() - data.timerUpdatedAt) / 1000)) : 0;
-                            const adjustedTime = Math.max(0, (data.timeRemaining || 0) - elapsedSec);
-                            setTimeRemaining(adjustedTime);
-                            setIsRunning(!!data.isRunning);
+                            let running = !!data.isRunning;
+                            let remaining = Math.max(0, data.timeRemaining || 0);
+                            let newEndsAt = null;
+                            if (running) {
+                                if (typeof data.endsAt === 'number') {
+                                    newEndsAt = data.endsAt;
+                                    remaining = Math.max(0, Math.ceil((newEndsAt - Date.now()) / 1000));
+                                } else { // older-format write: estimate from its timestamp
+                                    const elapsed = Math.max(0, Math.floor((Date.now() - data.timerUpdatedAt) / 1000));
+                                    remaining = Math.max(0, remaining - elapsed);
+                                    newEndsAt = Date.now() + remaining * 1000;
+                                }
+                                if (remaining <= 0) { running = false; newEndsAt = null; } // already over: show 0, paused
+                            }
+                            endsAtRef.current = running ? newEndsAt : null;
+                            lastTickValueRef.current = running ? remaining : null;
+                            lastTimerSigRef.current = makeTimerSig({ isRunning: running, timeRemaining: remaining, syncNonce: st.syncNonce }, newEndsAt);
+                            setTimeRemaining(remaining);
+                            setIsRunning(running);
                             setLiveSyncActive(true);
                         }
 
                         if (typeof data.dataUpdatedAt === 'number' && data.dataUpdatedAt !== lastDataPushAtRef.current) {
-                            if ('currentHighHandId' in data) {
-                                setCurrentHighHandId(data.currentHighHandId);
-                                // Make sure the hand is actually present locally so it
-                                // displays correctly, even if the regular (slower)
-                                // settings sync hasn't caught up with this hand yet.
-                                if (data.currentHighHandData && data.currentHighHandId) {
-                                    setPokerHands(prev => {
-                                        const exists = prev.some(h => h.id === data.currentHighHandId);
-                                        return exists ? prev : [...prev, data.currentHighHandData];
-                                    });
+                            // Hand list: mirror the other device. On the very first
+                            // snapshot only, keep any hands that exist solely on this
+                            // device (so joining can't silently drop them).
+                            let nextHands = st.pokerHands;
+                            if (Array.isArray(data.pokerHands)) {
+                                nextHands = data.pokerHands;
+                                if (isFirst && Array.isArray(st.pokerHands)) {
+                                    const have = new Set(nextHands.map(h => h.id));
+                                    nextHands = [...nextHands, ...st.pokerHands.filter(h => !have.has(h.id))];
                                 }
+                            } else if (data.currentHighHandData && data.currentHighHandId && Array.isArray(st.pokerHands)
+                                       && !st.pokerHands.some(h => h.id === data.currentHighHandId)) {
+                                nextHands = [...st.pokerHands, data.currentHighHandData]; // older-format write
                             }
+                            const merged = {};
+                            CASH_DATA_KEYS.forEach(k => { merged[k] = (k in data && data[k] !== undefined) ? data[k] : st[k]; });
+                            merged.pokerHands = nextHands;
+                            lastDataSigRef.current = dataSigFrom(merged);
+
+                            if (nextHands !== st.pokerHands) setPokerHands(nextHands);
+                            if ('currentHighHandId' in data) setCurrentHighHandId(data.currentHighHandId);
                             if (typeof data.badBeatJackpotAmount === 'number') setBadBeatJackpotAmount(data.badBeatJackpotAmount);
                             if (typeof data.showBadBeatJackpot === 'boolean') setShowBadBeatJackpot(data.showBadBeatJackpot);
                             if ('sevenDeuceBounty' in data) setSevenDeuceBounty(data.sevenDeuceBounty);
@@ -7670,8 +7952,8 @@ useEffect(() => { localStorage.setItem('showSquidGame', JSON.stringify(showSquid
                             setLiveSyncActive(true);
                         }
                     }, e => console.error('Clock sync listener error:', e));
-                return () => unsubscribe();
-            }, [isPro, authUser]);
+                return () => { unsubscribe(); clearTimeout(readyFallback); };
+            }, [isPro, authUser, liveSyncEnabled]);
 
             const startTimer = () => {
                 if (!isRunning && timeRemaining > 0) setIsRunning(true);
@@ -7703,11 +7985,9 @@ useEffect(() => { localStorage.setItem('showSquidGame', JSON.stringify(showSquid
                 
                 if (!isNaN(duration) && duration >= 0) {
                     setInputDuration(duration);
-                    if (timerRef.current) { clearInterval(timerRef.current); }
                     if (isRunning || (timeRemaining === 0 && duration > 0)) {
                         setTimeRemaining(duration * 60);
                         setIsRunning(true);
-                        timerRef.current = setInterval(() => setTimeRemaining((prevTime) => prevTime - 1), 1000);
                     } else { setTimeRemaining(duration * 60); }
                 } else if ((typeof param === 'object' && param.target && param.target.value === '') || param === '') {
                     setInputDuration(''); setTimeRemaining(0); clearInterval(timerRef.current); setIsRunning(false);
